@@ -37,6 +37,7 @@
     modules: [],
     dailyDate: todayStr(),
     dailyEntries: {}, // moduleName -> {number, data}
+    dailyLoaded: false,
   };
 
   // ---------- small helpers ----------
@@ -191,10 +192,21 @@
     state.tab = tab;
     document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
     document.getElementById("backlogView").classList.toggle("active", tab === "backlog");
+    document.getElementById("modulesView").classList.toggle("active", tab === "modules");
     document.getElementById("dailyView").classList.toggle("active", tab === "daily");
 
     if (tab === "backlog" && state.backlogItems.length === 0) loadBacklog();
-    if (tab === "daily" && state.modules.length === 0) loadModulesAndDaily();
+    if (tab === "modules" && state.modules.length === 0) loadModules();
+    if (tab === "daily") {
+      if (state.modules.length === 0) {
+        loadModulesAndDaily();
+      } else if (!state.dailyLoaded) {
+        loadDailyEntries(state.dailyDate);
+      } else {
+        renderDailyTable();
+        renderSummary();
+      }
+    }
   }
 
   // =========================================================
@@ -470,6 +482,15 @@
   }
 
   // =========================================================
+  // Module management
+  // =========================================================
+  function setModuleStatus(msg, isError) {
+    const el = document.getElementById("moduleStatusMsg");
+    el.textContent = msg || "";
+    el.classList.toggle("error", !!isError);
+  }
+
+  // =========================================================
   // Daily test tracking
   // =========================================================
   function setDailyStatus(msg, isError) {
@@ -484,7 +505,7 @@
   }
 
   async function loadModules() {
-    setDailyStatus("載入模組中…");
+    setModuleStatus("載入模組中…");
     try {
       const issues = await ghFetch(`/issues?labels=${enc(LABEL.module)}&state=open&per_page=100`);
       state.modules = issues.map((issue) => ({
@@ -492,9 +513,9 @@
         data: extractData(issue.body) || { name: issue.title, owners: [] },
       }));
       renderModuleList();
-      setDailyStatus("");
+      setModuleStatus("");
     } catch (e) {
-      setDailyStatus("讀取模組失敗：" + e.message, true);
+      setModuleStatus("讀取模組失敗：" + e.message, true);
     }
   }
 
@@ -517,7 +538,6 @@
             body: JSON.stringify({ state: "closed" }),
           });
           await loadModules();
-          renderDailyTable();
         } catch (e) {
           alert("移除失敗：" + e.message);
         }
@@ -538,7 +558,7 @@
     const originalBtnText = btn.textContent;
     btn.disabled = true;
     btn.textContent = "新增中…";
-    setDailyStatus("新增模組中，請稍候…");
+    setModuleStatus("新增模組中，請稍候…");
     try {
       await ghFetch("/issues", {
         method: "POST",
@@ -547,12 +567,11 @@
       document.getElementById("newModuleName").value = "";
       document.getElementById("newModuleOwners").value = "";
       await loadModules();
-      await loadDailyEntries(state.dailyDate);
-      setDailyStatus("已新增模組 ✓");
-      setTimeout(() => setDailyStatus(""), 1500);
+      setModuleStatus("已新增模組 ✓");
+      setTimeout(() => setModuleStatus(""), 1500);
     } catch (err) {
       alert("新增模組失敗：" + err.message);
-      setDailyStatus("");
+      setModuleStatus("");
     }
     btn.disabled = false;
     btn.textContent = originalBtnText;
@@ -569,6 +588,7 @@
         if (d && d.module) map[d.module] = { number: issue.number, data: d };
       });
       state.dailyEntries = map;
+      state.dailyLoaded = true;
       renderDailyTable();
       renderSummary();
       setDailyStatus("");

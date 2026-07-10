@@ -25,6 +25,7 @@
 
     <nav class="tabs" id="tabNav">
       <button data-tab="backlog" class="tab-btn active">Backlog 追蹤</button>
+      <button data-tab="modules" class="tab-btn">模組管理</button>
       <button data-tab="daily" class="tab-btn">每日測試追蹤</button>
     </nav>
 
@@ -53,19 +54,20 @@
       </div>
     </section>
 
-    <section id="dailyView" class="tab-view">
-      <details class="module-drawer" id="moduleDrawer">
-        <summary>模組管理（FSD 模組 / 負責人）</summary>
-        <div class="module-manage">
-          <div class="module-list" id="moduleList"></div>
-          <form id="addModuleForm" class="inline-form">
-            <input type="text" id="newModuleName" placeholder="模組名稱（例如：前台顯示）" required>
-            <input type="text" id="newModuleOwners" placeholder="負責人（多人可用、分隔）">
-            <button type="submit" class="btn-primary">新增模組</button>
-          </form>
-        </div>
-      </details>
+    <section id="modulesView" class="tab-view">
+      <div class="module-panel">
+        <div class="module-panel-title">FSD 模組 / 負責人管理</div>
+        <div class="module-list" id="moduleList"></div>
+        <form id="addModuleForm" class="inline-form">
+          <input type="text" id="newModuleName" placeholder="模組名稱（例如：前台顯示）" required>
+          <input type="text" id="newModuleOwners" placeholder="負責人（多人可用、分隔）">
+          <button type="submit" class="btn-primary">新增模組</button>
+        </form>
+        <span class="status-msg" id="moduleStatusMsg"></span>
+      </div>
+    </section>
 
+    <section id="dailyView" class="tab-view">
       <div class="toolbar">
         <label class="date-field">
           日期

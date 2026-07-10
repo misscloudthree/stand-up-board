@@ -307,22 +307,21 @@ main{ padding: 20px 24px 60px; max-width: 1280px; margin: 0 auto; }
   padding: 20px 10px;
 }
 
-/* ---------- Daily tracking ---------- */
-.module-drawer{
+/* ---------- Module management ---------- */
+.module-panel{
   background: var(--panel);
   border: 1px solid var(--hairline);
   border-radius: var(--radius);
+  padding: 18px 16px;
   margin-bottom: 18px;
-  padding: 4px 16px;
 }
-.module-drawer summary{
-  cursor:pointer;
-  padding: 12px 0;
-  font-weight: 600;
-  font-size: 13px;
+.module-panel-title{
   font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 14px;
 }
-.module-manage{ padding: 4px 0 16px; }
 .module-list{
   display:flex;
   flex-wrap:wrap;
