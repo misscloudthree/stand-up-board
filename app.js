@@ -535,7 +535,10 @@
     const dataObj = { name, owners };
     const body = buildBody(dataObj, [`**負責人**：${owners.join("、") || "-"}`]);
     const btn = e.target.querySelector("button[type=submit]");
+    const originalBtnText = btn.textContent;
     btn.disabled = true;
+    btn.textContent = "新增中…";
+    setDailyStatus("新增模組中，請稍候…");
     try {
       await ghFetch("/issues", {
         method: "POST",
@@ -545,10 +548,14 @@
       document.getElementById("newModuleOwners").value = "";
       await loadModules();
       await loadDailyEntries(state.dailyDate);
+      setDailyStatus("已新增模組 ✓");
+      setTimeout(() => setDailyStatus(""), 1500);
     } catch (err) {
       alert("新增模組失敗：" + err.message);
+      setDailyStatus("");
     }
     btn.disabled = false;
+    btn.textContent = originalBtnText;
   }
 
   async function loadDailyEntries(date) {
