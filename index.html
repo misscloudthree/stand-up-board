@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>站會看板 · Standup Board</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">▣</span>
+      <h1>站會看板</h1>
+    </div>
+
+    <div class="board-clock">
+      <span class="clock-label">TODAY</span>
+      <span class="clock-date" id="todayDate">--</span>
+    </div>
+
+    <nav class="tabs" id="tabNav">
+      <button data-tab="backlog" class="tab-btn active">Backlog 追蹤</button>
+      <button data-tab="daily" class="tab-btn">每日測試追蹤</button>
+    </nav>
+
+    <button class="icon-btn" id="settingsBtn" title="設定" aria-label="設定">⚙</button>
+  </header>
+
+  <div id="configWarning" class="config-warning hidden">
+    <strong>尚未設定 GitHub 連線資訊</strong>
+    <p>請先編輯 <code>config.js</code> 填入 GitHub 帳號與 repo 名稱，並在右上角「設定」輸入你的 Personal Access Token。詳細步驟請參考 README.md。</p>
+  </div>
+
+  <main id="mainContent">
+
+    <section id="backlogView" class="tab-view active">
+      <div class="toolbar">
+        <button class="btn-primary" id="addBacklogBtn">＋ 新增 Backlog</button>
+        <label class="filter-toggle">
+          <input type="checkbox" id="filterUnfinished" checked>
+          只顯示未完成
+        </label>
+        <button class="btn-ghost" id="refreshBacklogBtn">重新整理</button>
+        <span class="status-msg" id="backlogStatusMsg"></span>
+      </div>
+      <div class="board-columns" id="backlogColumns">
+        <div class="empty-hint">載入中…</div>
+      </div>
+    </section>
+
+    <section id="dailyView" class="tab-view">
+      <details class="module-drawer" id="moduleDrawer">
+        <summary>模組管理（FSD 模組 / 負責人）</summary>
+        <div class="module-manage">
+          <div class="module-list" id="moduleList"></div>
+          <form id="addModuleForm" class="inline-form">
+            <input type="text" id="newModuleName" placeholder="模組名稱（例如：前台顯示）" required>
+            <input type="text" id="newModuleOwners" placeholder="負責人（多人可用、分隔）">
+            <button type="submit" class="btn-primary">新增模組</button>
+          </form>
+        </div>
+      </details>
+
+      <div class="toolbar">
+        <label class="date-field">
+          日期
+          <input type="date" id="dailyDatePicker">
+        </label>
+        <button class="btn-ghost" id="refreshDailyBtn">重新整理</button>
+        <span class="status-msg" id="dailyStatusMsg"></span>
+      </div>
+
+      <div class="table-wrap">
+        <table class="daily-table">
+          <thead>
+            <tr>
+              <th>模組</th>
+              <th>負責人</th>
+              <th>開單量</th>
+              <th>複測數量</th>
+              <th>複測通過量</th>
+              <th>Pre-UAT 處理量</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="dailyTableBody">
+            <tr><td colspan="7" class="empty-hint">載入中…</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="summary-panel">
+        <div class="summary-title">今日 Summary（所有模組加總）</div>
+        <div class="summary-board" id="summaryBoard"></div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<div id="overlayRoot"></div>
+
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
