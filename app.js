@@ -19,6 +19,7 @@
     backlog: "type:backlog",
     module: "type:module",
     daily: "type:daily-entry",
+    dailyField: "type:daily-field",
   };
 
   const STATUS = {
@@ -29,12 +30,21 @@
   };
   const STATUS_ORDER = ["pending", "doing", "done", "void"];
 
+  // 既有固定欄位的預設值，key 沿用舊資料的欄位名稱，讓歷史資料不受影響。
+  const DEFAULT_DAILY_FIELDS = [
+    { key: "opened", label: "開單量" },
+    { key: "retested", label: "複測數量" },
+    { key: "retestPassed", label: "複測通過量" },
+    { key: "preUat", label: "Pre-UAT 處理量" },
+  ];
+
   const state = {
     token: localStorage.getItem(LS_TOKEN) || "",
     displayName: localStorage.getItem(LS_NAME) || "",
     tab: "backlog",
     backlogItems: [],
     modules: [],
+    dailyFields: [], // [{number, key, label}]
     dailyDate: todayStr(),
     dailyEntries: {}, // moduleName -> {number, data}
     dailyLoaded: false,
@@ -59,6 +69,21 @@
 
   function enc(s) {
     return encodeURIComponent(s);
+  }
+
+  function makeFieldKey() {
+    return "f" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  }
+
+  // 相容舊版資料：舊的每日紀錄把數值直接放在頂層（opened/retested/...），
+  // 新版統一收進 values 物件，這裡做個轉接讓歷史資料照樣顯示。
+  function getEntryValues(data) {
+    if (data.values) return data.values;
+    const legacy = {};
+    DEFAULT_DAILY_FIELDS.forEach((f) => {
+      if (data[f.key] !== undefined) legacy[f.key] = data[f.key];
+    });
+    return legacy;
   }
 
   function extractData(body) {
@@ -159,12 +184,14 @@
       await ensureLabel(LABEL.backlog, "5319e7");
       await ensureLabel(LABEL.module, "1d76db");
       await ensureLabel(LABEL.daily, "0e8a16");
+      await ensureLabel(LABEL.dailyField, "fbca04");
     } catch (e) {
       /* ignore */
     }
 
     state.backlogItems = [];
     state.modules = [];
+    state.dailyFields = [];
     switchTab(state.tab);
   }
 
@@ -184,6 +211,7 @@
     });
 
     document.getElementById("addModuleForm").addEventListener("submit", onAddModuleSubmit);
+    document.getElementById("addFieldForm").addEventListener("submit", onAddFieldSubmit);
     document.getElementById("refreshDailyBtn").addEventListener("click", () => loadDailyEntries(state.dailyDate));
     document.getElementById("dailyDatePicker").addEventListener("change", (e) => {
       state.dailyDate = e.target.value || todayStr();
@@ -208,7 +236,7 @@
     if (tab === "backlog" && state.backlogItems.length === 0) loadBacklog();
     if (tab === "modules" && state.modules.length === 0) loadModules();
     if (tab === "daily") {
-      if (state.modules.length === 0) {
+      if (state.modules.length === 0 || state.dailyFields.length === 0) {
         loadModulesAndDaily();
       } else if (!state.dailyLoaded) {
         loadDailyEntries(state.dailyDate);
@@ -523,7 +551,110 @@
 
   async function loadModulesAndDaily() {
     await loadModules();
+    await loadDailyFields();
     await loadDailyEntries(state.dailyDate);
+  }
+
+  // =========================================================
+  // Daily tracked-field management
+  // =========================================================
+  function setFieldStatus(msg, isError) {
+    const el = document.getElementById("fieldStatusMsg");
+    el.textContent = msg || "";
+    el.classList.toggle("error", !!isError);
+  }
+
+  function mapFieldIssue(issue) {
+    const d = extractData(issue.body) || {};
+    return { number: issue.number, key: d.key || String(issue.number), label: d.label || issue.title };
+  }
+
+  async function loadDailyFields() {
+    setFieldStatus("載入追蹤項目中…");
+    try {
+      let issues = await ghFetch(`/issues?labels=${enc(LABEL.dailyField)}&state=open&per_page=100`);
+      if (issues.length === 0) {
+        for (const f of DEFAULT_DAILY_FIELDS) {
+          const body = buildBody(f, [`**追蹤項目**：${f.label}`]);
+          await ghFetch("/issues", {
+            method: "POST",
+            body: JSON.stringify({ title: `[field] ${f.label}`, body, labels: [LABEL.dailyField] }),
+          });
+        }
+        issues = await ghFetch(`/issues?labels=${enc(LABEL.dailyField)}&state=open&per_page=100`);
+      }
+      state.dailyFields = issues.map(mapFieldIssue).sort((a, b) => a.number - b.number);
+      renderFieldList();
+      renderDailyTableHead();
+      setFieldStatus("");
+    } catch (e) {
+      setFieldStatus("讀取追蹤項目失敗：" + e.message, true);
+      document.getElementById("fieldList").innerHTML =
+        `<span class="empty-hint error">無法載入追蹤項目：${escapeHTML(e.message)}</span>`;
+    }
+  }
+
+  function renderFieldList() {
+    const el = document.getElementById("fieldList");
+    el.innerHTML = state.dailyFields.length
+      ? state.dailyFields.map((f) => `
+          <span class="module-chip">
+            ${escapeHTML(f.label)}
+            <button type="button" data-remove-field="${f.number}" title="移除追蹤項目">✕</button>
+          </span>`).join("")
+      : '<span class="empty-hint">尚未設定追蹤項目</span>';
+
+    el.querySelectorAll("[data-remove-field]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        if (state.dailyFields.length <= 1) {
+          alert("至少需保留一個追蹤項目");
+          return;
+        }
+        if (!confirm("確定要移除這個追蹤項目嗎？（歷史測試資料仍會保留在 GitHub Issues 中，只是不再顯示這個欄位）")) return;
+        try {
+          await ghFetch(`/issues/${btn.dataset.removeField}`, {
+            method: "PATCH",
+            body: JSON.stringify({ state: "closed" }),
+          });
+          await loadDailyFields();
+          renderDailyTable();
+          renderSummary();
+        } catch (e) {
+          alert("移除失敗：" + e.message);
+        }
+      });
+    });
+  }
+
+  async function onAddFieldSubmit(e) {
+    e.preventDefault();
+    const label = document.getElementById("newFieldLabel").value.trim();
+    if (!label) return;
+
+    const dataObj = { key: makeFieldKey(), label };
+    const body = buildBody(dataObj, [`**追蹤項目**：${label}`]);
+    const btn = e.target.querySelector("button[type=submit]");
+    const originalBtnText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "新增中…";
+    setFieldStatus("新增追蹤項目中，請稍候…");
+    try {
+      await ghFetch("/issues", {
+        method: "POST",
+        body: JSON.stringify({ title: `[field] ${label}`, body, labels: [LABEL.dailyField] }),
+      });
+      document.getElementById("newFieldLabel").value = "";
+      await loadDailyFields();
+      renderDailyTable();
+      renderSummary();
+      setFieldStatus("已新增追蹤項目 ✓");
+      setTimeout(() => setFieldStatus(""), 1500);
+    } catch (err) {
+      alert("新增追蹤項目失敗：" + err.message);
+      setFieldStatus("");
+    }
+    btn.disabled = false;
+    btn.textContent = originalBtnText;
   }
 
   async function loadModules() {
@@ -619,22 +750,27 @@
     } catch (e) {
       setDailyStatus("讀取失敗：" + e.message, true);
       document.getElementById("dailyTableBody").innerHTML =
-        `<tr><td colspan="7" class="empty-hint error">無法載入每日資料：${escapeHTML(e.message)}</td></tr>`;
+        `<tr><td colspan="${state.dailyFields.length + 3}" class="empty-hint error">無法載入每日資料：${escapeHTML(e.message)}</td></tr>`;
     }
+  }
+
+  function renderDailyTableHead() {
+    const tr = document.getElementById("dailyTableHead");
+    tr.innerHTML = `<th>模組</th><th>負責人</th>${state.dailyFields.map((f) => `<th>${escapeHTML(f.label)}</th>`).join("")}<th></th>`;
   }
 
   function dailyRowHTML(mod) {
     const name = mod.data.name;
     const entry = state.dailyEntries[name];
-    const v = entry ? entry.data : { opened: 0, retested: 0, retestPassed: 0, preUat: 0 };
+    const values = entry ? getEntryValues(entry.data) : {};
+    const cells = state.dailyFields
+      .map((f) => `<td><input type="number" min="0" class="num-input" data-field-key="${escapeHTML(f.key)}" value="${values[f.key] || 0}"></td>`)
+      .join("");
     return `
       <tr data-module="${escapeHTML(name)}">
         <td>${escapeHTML(name)}</td>
         <td class="muted">${escapeHTML((mod.data.owners || []).join("、"))}</td>
-        <td><input type="number" min="0" class="num-input" data-field="opened" value="${v.opened || 0}"></td>
-        <td><input type="number" min="0" class="num-input" data-field="retested" value="${v.retested || 0}"></td>
-        <td><input type="number" min="0" class="num-input" data-field="retestPassed" value="${v.retestPassed || 0}"></td>
-        <td><input type="number" min="0" class="num-input" data-field="preUat" value="${v.preUat || 0}"></td>
+        ${cells}
         <td><button type="button" class="btn-save" data-action="save-row">儲存</button></td>
       </tr>`;
   }
@@ -643,28 +779,26 @@
     const tbody = document.getElementById("dailyTableBody");
     tbody.innerHTML = state.modules.length
       ? state.modules.map(dailyRowHTML).join("")
-      : `<tr><td colspan="7" class="empty-hint">尚未新增模組，請先在上方「模組管理」新增</td></tr>`;
+      : `<tr><td colspan="${state.dailyFields.length + 3}" class="empty-hint">尚未新增模組，請先在上方「模組管理」新增</td></tr>`;
   }
 
   async function saveDailyEntry(moduleName, btn) {
     const tr = btn.closest("tr");
-    const get = (f) => Number(tr.querySelector(`[data-field="${f}"]`).value) || 0;
+    const values = {};
+    state.dailyFields.forEach((f) => {
+      const input = tr.querySelector(`[data-field-key="${CSS.escape(f.key)}"]`);
+      values[f.key] = Number(input.value) || 0;
+    });
     const dataObj = {
       module: moduleName,
       date: state.dailyDate,
-      opened: get("opened"),
-      retested: get("retested"),
-      retestPassed: get("retestPassed"),
-      preUat: get("preUat"),
+      values,
       reporter: state.displayName || "-",
     };
     const body = buildBody(dataObj, [
       `**模組**：${moduleName}`,
       `**日期**：${state.dailyDate}`,
-      `**開單量**：${dataObj.opened}`,
-      `**複測數量**：${dataObj.retested}`,
-      `**複測通過量**：${dataObj.retestPassed}`,
-      `**Pre-UAT 處理量**：${dataObj.preUat}`,
+      ...state.dailyFields.map((f) => `**${f.label}**：${values[f.key]}`),
       `**回報人**：${dataObj.reporter}`,
     ]);
 
@@ -703,19 +837,15 @@
   }
 
   function renderSummary() {
-    const totals = { opened: 0, retested: 0, retestPassed: 0, preUat: 0 };
+    const totals = {};
+    state.dailyFields.forEach((f) => { totals[f.key] = 0; });
     Object.values(state.dailyEntries).forEach((e) => {
-      totals.opened += e.data.opened || 0;
-      totals.retested += e.data.retested || 0;
-      totals.retestPassed += e.data.retestPassed || 0;
-      totals.preUat += e.data.preUat || 0;
+      const values = getEntryValues(e.data);
+      state.dailyFields.forEach((f) => { totals[f.key] += values[f.key] || 0; });
     });
-    document.getElementById("summaryBoard").innerHTML = `
-      <div class="summary-item"><span class="summary-num">${totals.opened}</span><span class="summary-label">開單量</span></div>
-      <div class="summary-item"><span class="summary-num">${totals.retested}</span><span class="summary-label">複測數量</span></div>
-      <div class="summary-item"><span class="summary-num">${totals.retestPassed}</span><span class="summary-label">複測通過量</span></div>
-      <div class="summary-item"><span class="summary-num">${totals.preUat}</span><span class="summary-label">Pre-UAT 處理量</span></div>
-    `;
+    document.getElementById("summaryBoard").innerHTML = state.dailyFields.map((f) => `
+      <div class="summary-item"><span class="summary-num">${totals[f.key]}</span><span class="summary-label">${escapeHTML(f.label)}</span></div>
+    `).join("");
   }
 
   // =========================================================

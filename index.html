@@ -69,6 +69,18 @@
     </section>
 
     <section id="dailyView" class="tab-view">
+      <details class="field-drawer" id="fieldDrawer">
+        <summary>追蹤項目設定</summary>
+        <div class="field-manage">
+          <div class="module-list" id="fieldList"></div>
+          <form id="addFieldForm" class="inline-form">
+            <input type="text" id="newFieldLabel" placeholder="追蹤項目名稱（例如：漏測數量）" required>
+            <button type="submit" class="btn-primary">新增項目</button>
+          </form>
+          <span class="status-msg" id="fieldStatusMsg"></span>
+        </div>
+      </details>
+
       <div class="toolbar">
         <label class="date-field">
           日期
@@ -81,18 +93,14 @@
       <div class="table-wrap">
         <table class="daily-table">
           <thead>
-            <tr>
+            <tr id="dailyTableHead">
               <th>模組</th>
               <th>負責人</th>
-              <th>開單量</th>
-              <th>複測數量</th>
-              <th>複測通過量</th>
-              <th>Pre-UAT 處理量</th>
               <th></th>
             </tr>
           </thead>
           <tbody id="dailyTableBody">
-            <tr><td colspan="7" class="empty-hint">載入中…</td></tr>
+            <tr><td colspan="3" class="empty-hint">載入中…</td></tr>
           </tbody>
         </table>
       </div>
