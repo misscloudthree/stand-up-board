@@ -123,8 +123,18 @@
   }
 
   // ---------- init ----------
+  function updateClock() {
+    document.getElementById("todayDate").textContent = todayStr();
+    document.getElementById("todayTime").textContent = new Date().toLocaleTimeString("zh-TW", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+  }
+
   document.addEventListener("DOMContentLoaded", () => {
-    document.getElementById("todayDate").textContent = state.dailyDate;
+    updateClock();
+    setInterval(updateClock, 30000);
     document.getElementById("dailyDatePicker").value = state.dailyDate;
     bindStaticEvents();
     startApp();
@@ -232,6 +242,8 @@
       setBacklogStatus("");
     } catch (e) {
       setBacklogStatus("讀取失敗：" + e.message, true);
+      document.getElementById("backlogColumns").innerHTML =
+        `<div class="empty-hint error">無法載入 Backlog：${escapeHTML(e.message)}<br>請確認設定後點擊「重新整理」</div>`;
     }
   }
 
@@ -274,10 +286,20 @@
       cols[st].sort((a, b) => (a.data.deadline || "9999-99-99").localeCompare(b.data.deadline || "9999-99-99"));
     });
 
+    let pendingWorst = "";
+    cols.pending.forEach((item) => {
+      const u = getUrgency(item.data.deadline, item.data.status);
+      if (u.cls === "danger") pendingWorst = "danger";
+      else if (u.cls === "warn" && pendingWorst !== "danger") pendingWorst = "warn";
+    });
+    const urgencyDot = pendingWorst
+      ? `<span class="col-urgency-dot ${pendingWorst}" title="有項目即將到期或已逾期" aria-hidden="true"></span>`
+      : "";
+
     const container = document.getElementById("backlogColumns");
     container.innerHTML = STATUS_ORDER.map((key) => `
       <div class="board-col" data-status="${key}">
-        <div class="col-head"><span>${STATUS[key].label}</span><span class="count-badge">${cols[key].length}</span></div>
+        <div class="col-head"><span>${key === "pending" ? urgencyDot : ""}${STATUS[key].label}</span><span class="count-badge">${cols[key].length}</span></div>
         <div class="col-body">${cols[key].map(backlogCardHTML).join("") || '<div class="empty-hint">目前沒有項目</div>'}</div>
       </div>
     `).join("");
@@ -516,6 +538,8 @@
       setModuleStatus("");
     } catch (e) {
       setModuleStatus("讀取模組失敗：" + e.message, true);
+      document.getElementById("moduleList").innerHTML =
+        `<span class="empty-hint error">無法載入模組：${escapeHTML(e.message)}</span>`;
     }
   }
 
@@ -527,7 +551,7 @@
             ${escapeHTML(m.data.name)}${m.data.owners?.length ? " · " + escapeHTML(m.data.owners.join("、")) : ""}
             <button type="button" data-remove-module="${m.number}" title="移除模組">✕</button>
           </span>`).join("")
-      : '<span class="empty-hint">尚未新增任何模組</span>';
+      : '<span class="empty-hint">還沒有模組，於下方新增一個開始追蹤</span>';
 
     el.querySelectorAll("[data-remove-module]").forEach((btn) => {
       btn.addEventListener("click", async () => {
@@ -594,6 +618,8 @@
       setDailyStatus("");
     } catch (e) {
       setDailyStatus("讀取失敗：" + e.message, true);
+      document.getElementById("dailyTableBody").innerHTML =
+        `<tr><td colspan="7" class="empty-hint error">無法載入每日資料：${escapeHTML(e.message)}</td></tr>`;
     }
   }
 

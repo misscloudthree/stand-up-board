@@ -71,9 +71,9 @@ button, input{ font-family: inherit; }
 }
 .brand h1{
   font-family: var(--font-display);
-  font-size: 18px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
   margin:0;
 }
 
@@ -86,9 +86,22 @@ button, input{ font-family: inherit; }
   border-right: 1px solid var(--hairline);
 }
 .clock-label{
+  display:flex;
+  align-items:center;
+  gap:6px;
   font-size: 10px;
   letter-spacing: 0.12em;
   color: var(--text-muted);
+}
+.clock-live-dot{
+  width:6px; height:6px;
+  border-radius:50%;
+  background: var(--status-doing);
+  animation: pulse-dot 2.4s ease-in-out infinite;
+}
+@keyframes pulse-dot{
+  0%, 100%{ box-shadow: 0 0 0 0 rgba(70,198,184,0.55); }
+  50%{ box-shadow: 0 0 0 4px rgba(70,198,184,0); }
 }
 .clock-date{
   font-family: var(--font-mono);
@@ -96,11 +109,18 @@ button, input{ font-family: inherit; }
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
+.clock-time{
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
 
 .tabs{
   display:flex;
   gap:6px;
   margin-left: 4px;
+  overflow-x: auto;
 }
 .tab-btn{
   background: transparent;
@@ -111,6 +131,9 @@ button, input{ font-family: inherit; }
   cursor:pointer;
   font-size: 13px;
   font-weight: 500;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .tab-btn.active{
   background: var(--status-doing);
@@ -239,7 +262,17 @@ main{ padding: 20px 24px 60px; max-width: 1280px; margin: 0 auto; }
   font-family: var(--font-display);
   font-weight: 600;
   font-size: 13px;
+  letter-spacing: 0.02em;
 }
+.col-urgency-dot{
+  display:inline-block;
+  width:7px; height:7px;
+  border-radius:50%;
+  margin-right:7px;
+  background: var(--status-warn);
+  vertical-align:middle;
+}
+.col-urgency-dot.danger{ background: var(--status-danger); }
 .count-badge{
   background: var(--panel-2);
   color: var(--text-muted);
@@ -267,7 +300,8 @@ main{ padding: 20px 24px 60px; max-width: 1280px; margin: 0 auto; }
 .card.danger{ border-color: var(--status-danger); }
 
 .card-content{
-  font-size: 13.5px;
+  font-size: 14px;
+  font-weight: 500;
   line-height: 1.5;
   margin-bottom: 8px;
   white-space: pre-wrap;
@@ -306,6 +340,7 @@ main{ padding: 20px 24px 60px; max-width: 1280px; margin: 0 auto; }
   text-align:center;
   padding: 20px 10px;
 }
+.empty-hint.error{ color: var(--status-danger); }
 
 /* ---------- Module management ---------- */
 .module-panel{
