@@ -45,10 +45,27 @@
     <section id="backlogView" class="tab-view active">
       <div class="toolbar">
         <button class="btn-primary" id="addBacklogBtn">＋ 新增 Backlog</button>
-        <label class="filter-toggle">
-          <input type="checkbox" id="filterUnfinished" checked>
-          只顯示未完成
+
+        <div class="filter-group" id="statusFilterGroup">
+          <label class="filter-toggle"><input type="checkbox" class="status-filter-cb" value="pending" checked>待處理</label>
+          <label class="filter-toggle"><input type="checkbox" class="status-filter-cb" value="doing" checked>進行中</label>
+          <label class="filter-toggle"><input type="checkbox" class="status-filter-cb" value="done">已完成</label>
+          <label class="filter-toggle"><input type="checkbox" class="status-filter-cb" value="void">作廢</label>
+        </div>
+
+        <label class="date-field">
+          類型
+          <select id="filterCategory"><option value="">全部類型</option></select>
         </label>
+
+        <label class="date-field">
+          排序
+          <select id="sortDeadline">
+            <option value="asc">Deadline 近到遠</option>
+            <option value="desc">Deadline 遠到近</option>
+          </select>
+        </label>
+
         <button class="btn-ghost" id="refreshBacklogBtn">重新整理</button>
         <span class="status-msg" id="backlogStatusMsg"></span>
       </div>

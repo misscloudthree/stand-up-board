@@ -327,7 +327,9 @@
 
     document.getElementById("addBacklogBtn").addEventListener("click", openAddBacklogModal);
     document.getElementById("refreshBacklogBtn").addEventListener("click", loadBacklog);
-    document.getElementById("filterUnfinished").addEventListener("change", renderBacklog);
+    document.querySelectorAll(".status-filter-cb").forEach((cb) => cb.addEventListener("change", renderBacklog));
+    document.getElementById("filterCategory").addEventListener("change", renderBacklog);
+    document.getElementById("sortDeadline").addEventListener("change", renderBacklog);
     document.getElementById("backlogColumns").addEventListener("click", (e) => {
       const card = e.target.closest(".card");
       if (card) openBacklogDetail(Number(card.dataset.issue));
@@ -399,6 +401,7 @@
         data: extractData(issue.body) || { status: "pending" },
         commentsCount: issue.comments || 0,
       }));
+      renderCategoryFilterOptions();
       renderBacklog();
       setBacklogStatus("");
     } catch (e) {
@@ -431,6 +434,14 @@
     return `<datalist id="${listId}">${getBacklogCategories().map((c) => `<option value="${escapeHTML(c)}"></option>`).join("")}</datalist>`;
   }
 
+  function renderCategoryFilterOptions() {
+    const sel = document.getElementById("filterCategory");
+    const current = sel.value;
+    const categories = getBacklogCategories();
+    sel.innerHTML = `<option value="">全部類型</option>` + categories.map((c) => `<option value="${escapeHTML(c)}">${escapeHTML(c)}</option>`).join("");
+    if (categories.includes(current)) sel.value = current;
+  }
+
   function backlogCardHTML(item) {
     const d = item.data;
     const urgency = getUrgency(d.deadline, d.status);
@@ -450,15 +461,24 @@
   }
 
   function renderBacklog() {
-    const hideFinished = document.getElementById("filterUnfinished").checked;
+    const selectedStatuses = new Set(
+      [...document.querySelectorAll(".status-filter-cb:checked")].map((cb) => cb.value)
+    );
+    const categoryFilter = document.getElementById("filterCategory").value;
+    const sortDir = document.getElementById("sortDeadline").value;
+
     const cols = { pending: [], doing: [], done: [], void: [] };
     state.backlogItems.forEach((item) => {
       const st = STATUS[item.data.status] ? item.data.status : "pending";
-      if (hideFinished && (st === "done" || st === "void")) return;
+      if (!selectedStatuses.has(st)) return;
+      if (categoryFilter && (item.data.category || "") !== categoryFilter) return;
       cols[st].push(item);
     });
     Object.keys(cols).forEach((st) => {
-      cols[st].sort((a, b) => (a.data.deadline || "9999-99-99").localeCompare(b.data.deadline || "9999-99-99"));
+      cols[st].sort((a, b) => {
+        const cmp = (a.data.deadline || "9999-99-99").localeCompare(b.data.deadline || "9999-99-99");
+        return sortDir === "desc" ? -cmp : cmp;
+      });
     });
 
     let pendingWorst = "";
@@ -472,12 +492,15 @@
       : "";
 
     const container = document.getElementById("backlogColumns");
-    container.innerHTML = STATUS_ORDER.map((key) => `
-      <div class="board-col" data-status="${key}">
-        <div class="col-head"><span>${key === "pending" ? urgencyDot : ""}${STATUS[key].label}</span><span class="count-badge">${cols[key].length}</span></div>
-        <div class="col-body">${cols[key].map(backlogCardHTML).join("") || '<div class="empty-hint">目前沒有項目</div>'}</div>
-      </div>
-    `).join("");
+    const visibleKeys = STATUS_ORDER.filter((key) => selectedStatuses.has(key));
+    container.innerHTML = visibleKeys.length
+      ? visibleKeys.map((key) => `
+          <div class="board-col" data-status="${key}">
+            <div class="col-head"><span>${key === "pending" ? urgencyDot : ""}${STATUS[key].label}</span><span class="count-badge">${cols[key].length}</span></div>
+            <div class="col-body">${cols[key].map(backlogCardHTML).join("") || '<div class="empty-hint">目前沒有項目</div>'}</div>
+          </div>
+        `).join("")
+      : '<div class="empty-hint">請至少勾選一種狀態才會顯示項目</div>';
   }
 
   function openAddBacklogModal() {
