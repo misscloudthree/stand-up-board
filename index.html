@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
+<script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
 </head>
 <body>
 <div id="app">
@@ -28,6 +29,7 @@
       <button data-tab="backlog" class="tab-btn active">Backlog 追蹤</button>
       <button data-tab="modules" class="tab-btn">模組管理</button>
       <button data-tab="daily" class="tab-btn">每日測試追蹤</button>
+      <button data-tab="testing" class="tab-btn">交付測試追蹤</button>
     </nav>
 
     <button class="icon-btn" id="settingsBtn" title="設定" aria-label="設定">⚙</button>
@@ -108,6 +110,50 @@
       <div class="summary-panel">
         <div class="summary-title">今日 Summary（所有模組加總）</div>
         <div class="summary-board" id="summaryBoard"></div>
+      </div>
+    </section>
+
+    <section id="testingView" class="tab-view">
+      <div class="toolbar">
+        <button class="btn-ghost" id="downloadTemplateBtn">下載 Excel 範本</button>
+        <input type="file" id="uploadExcelInput" accept=".xlsx" class="hidden">
+        <button class="btn-primary" id="uploadExcelBtn">上傳 Excel 更新</button>
+        <button class="btn-ghost" id="refreshTestingBtn">重新整理</button>
+        <span class="status-msg" id="testingStatusMsg"></span>
+      </div>
+
+      <div id="uploadErrors" class="upload-errors hidden"></div>
+
+      <details class="field-drawer" id="phaseDrawer">
+        <summary>測試階段設定</summary>
+        <div class="field-manage">
+          <div class="form-row">
+            <label>全域預設「基本測試天數」（單一功能項目未個別設定時使用）</label>
+            <input type="number" min="0" id="defaultTestDaysInput" class="num-input" style="width:100px">
+          </div>
+          <div class="table-wrap">
+            <table class="daily-table">
+              <thead>
+                <tr>
+                  <th>交付階段</th>
+                  <th>FT 預計完成日</th>
+                  <th>SIT 預計完成日</th>
+                </tr>
+              </thead>
+              <tbody id="phaseSettingsBody">
+                <tr><td colspan="3" class="empty-hint">尚未載入資料</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="form-actions" style="margin-top:14px;">
+            <button type="button" class="btn-primary" id="savePhaseSettingsBtn">儲存階段設定</button>
+          </div>
+          <span class="status-msg" id="phaseStatusMsg"></span>
+        </div>
+      </details>
+
+      <div class="overview-grid" id="testingOverview">
+        <div class="empty-hint">載入中…</div>
       </div>
     </section>
 
