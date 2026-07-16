@@ -27,9 +27,9 @@
 
     <nav class="tabs" id="tabNav">
       <button data-tab="backlog" class="tab-btn active">Backlog 追蹤</button>
-      <button data-tab="modules" class="tab-btn">模組管理</button>
       <button data-tab="daily" class="tab-btn">每日測試追蹤</button>
       <button data-tab="testing" class="tab-btn">交付測試追蹤</button>
+      <button data-tab="settings" class="tab-btn">看板設定項目</button>
     </nav>
 
     <button class="icon-btn" id="settingsBtn" title="設定" aria-label="設定">⚙</button>
@@ -79,32 +79,7 @@
       </div>
     </section>
 
-    <section id="modulesView" class="tab-view">
-      <div class="module-panel">
-        <div class="module-panel-title">FSD 模組 / 負責人管理</div>
-        <div class="module-list" id="moduleList"></div>
-        <form id="addModuleForm" class="inline-form">
-          <input type="text" id="newModuleName" placeholder="模組名稱（例如：前台顯示）" required>
-          <input type="text" id="newModuleOwners" placeholder="負責人（多人可用、分隔）">
-          <button type="submit" class="btn-primary">新增模組</button>
-        </form>
-        <span class="status-msg" id="moduleStatusMsg"></span>
-      </div>
-    </section>
-
     <section id="dailyView" class="tab-view">
-      <details class="field-drawer" id="fieldDrawer">
-        <summary>追蹤項目設定</summary>
-        <div class="field-manage">
-          <div class="module-list" id="fieldList"></div>
-          <form id="addFieldForm" class="inline-form">
-            <input type="text" id="newFieldLabel" placeholder="追蹤項目名稱（例如：漏測數量）" required>
-            <button type="submit" class="btn-primary">新增項目</button>
-          </form>
-          <span class="status-msg" id="fieldStatusMsg"></span>
-        </div>
-      </details>
-
       <div class="toolbar">
         <label class="date-field">
           日期
@@ -132,6 +107,19 @@
       <div class="summary-panel">
         <div class="summary-title">今日 Summary（所有模組加總）</div>
         <div class="summary-board" id="summaryBoard"></div>
+      </div>
+
+      <div class="dashboard-panel">
+        <div class="dashboard-header">
+          <div class="summary-title">趨勢圖表</div>
+          <div class="granularity-toggle" id="granularityToggle">
+            <button type="button" class="granularity-btn active" data-granularity="week">依週</button>
+            <button type="button" class="granularity-btn" data-granularity="month">依月</button>
+          </div>
+        </div>
+        <div class="dashboard-grid" id="dailyDashboard">
+          <div class="empty-hint">載入中…</div>
+        </div>
       </div>
     </section>
 
@@ -176,6 +164,38 @@
 
       <div class="overview-grid" id="testingOverview">
         <div class="empty-hint">載入中…</div>
+      </div>
+    </section>
+
+    <section id="settingsView" class="tab-view">
+      <div class="module-panel">
+        <div class="module-panel-title">看板設定項目說明</div>
+        <p class="help-text">這裡的設定會影響其他頁籤的顯示，修改後請留意：</p>
+        <ul class="settings-explain-list">
+          <li><strong>FSD 模組管理</strong>：會影響「每日測試追蹤」的模組清單與加總、「交付測試追蹤」的模組總覽卡片分組，以及上傳 Excel 時比對/自動建立模組的依據。</li>
+          <li><strong>追蹤項目設定</strong>：會影響「每日測試追蹤」表格的欄位、下方 Summary 加總，以及趨勢圖表顯示的項目。</li>
+        </ul>
+      </div>
+
+      <div class="module-panel">
+        <div class="module-panel-title">FSD 模組 / 負責人管理</div>
+        <div class="module-list" id="moduleList"></div>
+        <form id="addModuleForm" class="inline-form">
+          <input type="text" id="newModuleName" placeholder="模組名稱（例如：前台顯示）" required>
+          <input type="text" id="newModuleOwners" placeholder="負責人（多人可用、分隔）">
+          <button type="submit" class="btn-primary">新增模組</button>
+        </form>
+        <span class="status-msg" id="moduleStatusMsg"></span>
+      </div>
+
+      <div class="module-panel">
+        <div class="module-panel-title">每日測試追蹤項目設定</div>
+        <div class="module-list" id="fieldList"></div>
+        <form id="addFieldForm" class="inline-form">
+          <input type="text" id="newFieldLabel" placeholder="追蹤項目名稱（例如：漏測數量）" required>
+          <button type="submit" class="btn-primary">新增項目</button>
+        </form>
+        <span class="status-msg" id="fieldStatusMsg"></span>
       </div>
     </section>
 

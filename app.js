@@ -94,6 +94,9 @@
     dailyDate: todayStr(),
     dailyEntries: {}, // moduleName -> {number, data}
     dailyLoaded: false,
+    dailyHistory: [], // [{module, date, values}] 跨所有日期，供趨勢圖表用
+    dailyHistoryLoaded: false,
+    dashboardGranularity: "week",
     testBatches: [], // [{number, fsd, fsdName, items: [...]}]
     testItems: [], // 攤平後的所有 item，each item 帶 _batchNumber/_fsd/_fsdName 反查用
     phaseSettings: { number: null, defaultTestDays: 3, phases: [] },
@@ -254,6 +257,18 @@
     return res.json();
   }
 
+  // 其他查詢資料量小、per_page=100 單頁夠用；歷史資料會持續累積，需要真正翻頁抓完。
+  async function ghFetchAllPages(path) {
+    let all = [];
+    for (let page = 1; page <= 20; page++) {
+      const sep = path.includes("?") ? "&" : "?";
+      const pageItems = await ghFetch(`${path}${sep}page=${page}`);
+      all = all.concat(pageItems);
+      if (pageItems.length < 100) break;
+    }
+    return all;
+  }
+
   async function ensureLabel(name, color) {
     try {
       await ghFetch("/labels", {
@@ -312,6 +327,8 @@
     state.backlogItems = [];
     state.modules = [];
     state.dailyFields = [];
+    state.dailyHistory = [];
+    state.dailyHistoryLoaded = false;
     state.testBatches = [];
     state.testItems = [];
     state.testingLoaded = false;
@@ -358,18 +375,29 @@
     document.getElementById("uploadExcelInput").addEventListener("change", onUploadExcelChange);
     document.getElementById("refreshTestingBtn").addEventListener("click", loadTestingAll);
     document.getElementById("savePhaseSettingsBtn").addEventListener("click", onSavePhaseSettings);
+
+    document.getElementById("granularityToggle").addEventListener("click", (e) => {
+      const btn = e.target.closest(".granularity-btn");
+      if (!btn) return;
+      state.dashboardGranularity = btn.dataset.granularity;
+      document.querySelectorAll(".granularity-btn").forEach((b) => b.classList.toggle("active", b === btn));
+      renderDailyDashboard();
+    });
   }
 
   function switchTab(tab) {
     state.tab = tab;
     document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
     document.getElementById("backlogView").classList.toggle("active", tab === "backlog");
-    document.getElementById("modulesView").classList.toggle("active", tab === "modules");
     document.getElementById("dailyView").classList.toggle("active", tab === "daily");
     document.getElementById("testingView").classList.toggle("active", tab === "testing");
+    document.getElementById("settingsView").classList.toggle("active", tab === "settings");
 
     if (tab === "backlog" && state.backlogItems.length === 0) loadBacklog();
-    if (tab === "modules" && state.modules.length === 0) loadModules();
+    if (tab === "settings") {
+      if (state.modules.length === 0) loadModules();
+      if (state.dailyFields.length === 0) loadDailyFields();
+    }
     if (tab === "daily") {
       if (state.modules.length === 0 || state.dailyFields.length === 0) {
         loadModulesAndDaily();
@@ -379,6 +407,7 @@
         renderDailyTable();
         renderSummary();
       }
+      if (!state.dailyHistoryLoaded) loadDailyHistory();
     }
     if (tab === "testing" && !state.testingLoaded) loadTestingAll();
   }
@@ -824,6 +853,7 @@
           await loadDailyFields();
           renderDailyTable();
           renderSummary();
+          if (state.dailyHistoryLoaded) renderDailyDashboard();
         } catch (e) {
           alert("移除失敗：" + e.message);
         }
@@ -852,6 +882,7 @@
       await loadDailyFields();
       renderDailyTable();
       renderSummary();
+      if (state.dailyHistoryLoaded) renderDailyDashboard();
       setFieldStatus("已新增追蹤項目 ✓");
       setTimeout(() => setFieldStatus(""), 1500);
     } catch (err) {
@@ -959,6 +990,141 @@
     }
   }
 
+  // ---------- Daily dashboard: pure aggregation helpers ----------
+  function weekStartOf(dateStr) {
+    const d = new Date(dateStr + "T00:00:00");
+    const dow = (d.getDay() + 6) % 7; // Monday = 0
+    d.setDate(d.getDate() - dow);
+    return d.toISOString().slice(0, 10);
+  }
+
+  function bucketKeyOf(dateStr, granularity) {
+    return granularity === "month" ? dateStr.slice(0, 7) : weekStartOf(dateStr);
+  }
+
+  function bucketLabelOf(key, granularity) {
+    if (granularity === "month") {
+      const [y, m] = key.split("-");
+      return `${y}/${m}`;
+    }
+    const [, m, d] = key.split("-");
+    return `${m}/${d}`;
+  }
+
+  // 把 state.dailyHistory（所有模組、所有日期）依週/月分桶加總，只取最近 N 個桶。
+  function aggregateHistory(granularity) {
+    const windowSize = granularity === "month" ? 6 : 8;
+    const buckets = {};
+    state.dailyHistory.forEach((entry) => {
+      const key = bucketKeyOf(entry.date, granularity);
+      if (!buckets[key]) buckets[key] = {};
+      state.dailyFields.forEach((f) => {
+        buckets[key][f.key] = (buckets[key][f.key] || 0) + (entry.values[f.key] || 0);
+      });
+    });
+    const sortedKeys = Object.keys(buckets).sort().slice(-windowSize);
+    const series = {};
+    state.dailyFields.forEach((f) => {
+      series[f.key] = sortedKeys.map((k) => buckets[k][f.key] || 0);
+    });
+    return { labels: sortedKeys.map((k) => bucketLabelOf(k, granularity)), series };
+  }
+
+  function setDashboardStatus(msg, isError) {
+    const el = document.getElementById("dailyDashboard");
+    if (msg) el.innerHTML = `<div class="chart-empty${isError ? " error" : ""}">${escapeHTML(msg)}</div>`;
+  }
+
+  async function loadDailyHistory() {
+    setDashboardStatus("載入趨勢資料中…");
+    try {
+      const issues = await ghFetchAllPages(`/issues?labels=${enc(LABEL.daily)}&state=all&per_page=100`);
+      state.dailyHistory = issues
+        .map((issue) => extractData(issue.body))
+        .filter((d) => d && d.module && d.date)
+        .map((d) => ({ module: d.module, date: d.date, values: getEntryValues(d) }));
+      state.dailyHistoryLoaded = true;
+      renderDailyDashboard();
+    } catch (e) {
+      state.dailyHistoryLoaded = false;
+      setDashboardStatus("無法載入趨勢資料：" + e.message, true);
+    }
+  }
+
+  // 長條圖路徑：上緣圓角 4px、底部貼齊基準線（方角），高度為 0 時退化成極小圓角。
+  function roundedTopBarPath(x, y, w, h) {
+    const rad = Math.min(4, h / 2, w / 2);
+    if (h <= 0) return "";
+    return `M${x},${y + h} L${x},${y + rad} Q${x},${y} ${x + rad},${y} L${x + w - rad},${y} Q${x + w},${y} ${x + w},${y + rad} L${x + w},${y + h} Z`;
+  }
+
+  // 單一系列（一個追蹤項目）的小型長條圖，符合 dataviz 準則：≤24px 粗細、4px 圓角資料端、
+  // 2px 間隔、只在最後一根標數值、軸線只標頭尾避免擁擠、hover 用原生 <title> 顯示數值。
+  function buildBarChartSVG(labels, values) {
+    const width = 280;
+    const height = 140;
+    const marginLeft = 30;
+    const marginRight = 8;
+    const marginTop = 18;
+    const marginBottom = 22;
+    const plotW = width - marginLeft - marginRight;
+    const plotH = height - marginTop - marginBottom;
+    const n = values.length;
+    // 每個時間點各佔一個等寬 slot、平均分布在整個寬度上（而不是把長條擠在中間），
+    // 這樣不管幾根長條，頭尾標籤都會撐到最開，才有空間不重疊。
+    const slotW = plotW / n;
+    const barW = Math.min(24, Math.max(4, slotW - 4));
+    const slotCenterX = (i) => marginLeft + slotW * (i + 0.5);
+    const maxVal = Math.max(1, ...values);
+
+    const bars = values.map((v, i) => {
+      const barH = maxVal > 0 ? (v / maxVal) * plotH : 0;
+      const cx = slotCenterX(i);
+      const x = cx - barW / 2;
+      const y = marginTop + plotH - barH;
+      const isLast = i === n - 1;
+      const path = roundedTopBarPath(x, y, barW, barH);
+      const valueLabel = isLast && v > 0
+        ? `<text class="chart-value-label" x="${cx}" y="${Math.max(y - 4, 10)}" text-anchor="middle">${v}</text>`
+        : "";
+      return `${path ? `<path class="chart-bar" d="${path}"><title>${escapeHTML(labels[i])}：${v}</title></path>` : ""}${valueLabel}`;
+    }).join("");
+
+    // 只標頭尾兩個時間點，避免 slot 太窄時文字互相疊在一起。
+    const axisLabels = [0, n - 1]
+      .filter((i, idx, arr) => arr.indexOf(i) === idx)
+      .map((i) => `<text class="chart-axis-label" x="${slotCenterX(i)}" y="${height - 6}" text-anchor="${i === 0 ? "start" : "end"}">${escapeHTML(labels[i])}</text>`)
+      .join("");
+
+    const maxLabel = `<text class="chart-axis-label" x="${marginLeft - 6}" y="${marginTop + 4}" text-anchor="end">${maxVal}</text>`;
+    const baseline = `<line x1="${marginLeft}" y1="${marginTop + plotH}" x2="${marginLeft + plotW}" y2="${marginTop + plotH}" stroke="var(--hairline)" stroke-width="1"/>`;
+
+    return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="長條圖">${baseline}${bars}${axisLabels}${maxLabel}</svg>`;
+  }
+
+  function renderDailyDashboard() {
+    const container = document.getElementById("dailyDashboard");
+    if (!state.dailyFields.length) {
+      container.innerHTML = '<div class="chart-empty">尚未設定追蹤項目</div>';
+      return;
+    }
+    if (!state.dailyHistory.length) {
+      container.innerHTML = '<div class="chart-empty">尚無歷史資料可顯示趨勢，先在上方表格輸入並儲存每日數字</div>';
+      return;
+    }
+    const { labels, series } = aggregateHistory(state.dashboardGranularity);
+    if (labels.length === 0) {
+      container.innerHTML = '<div class="chart-empty">尚無歷史資料可顯示趨勢</div>';
+      return;
+    }
+    container.innerHTML = state.dailyFields.map((f) => `
+      <div class="chart-card">
+        <div class="chart-card-title">${escapeHTML(f.label)}</div>
+        ${buildBarChartSVG(labels, series[f.key] || labels.map(() => 0))}
+      </div>
+    `).join("");
+  }
+
   function renderDailyTableHead() {
     const tr = document.getElementById("dailyTableHead");
     tr.innerHTML = `<th>模組</th><th>負責人</th>${state.dailyFields.map((f) => `<th>${escapeHTML(f.label)}</th>`).join("")}<th></th>`;
@@ -1029,6 +1195,15 @@
         state.dailyEntries[moduleName] = { number: issue.number, data: dataObj };
       }
       renderSummary();
+      if (state.dailyHistoryLoaded) {
+        const existingHistoryEntry = state.dailyHistory.find((h) => h.module === moduleName && h.date === state.dailyDate);
+        if (existingHistoryEntry) {
+          existingHistoryEntry.values = values;
+        } else {
+          state.dailyHistory.push({ module: moduleName, date: state.dailyDate, values });
+        }
+        renderDailyDashboard();
+      }
       btn.textContent = "已儲存 ✓";
       btn.classList.add("saved");
       setTimeout(() => {
