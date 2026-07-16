@@ -329,6 +329,7 @@
     document.getElementById("refreshBacklogBtn").addEventListener("click", loadBacklog);
     document.querySelectorAll(".status-filter-cb").forEach((cb) => cb.addEventListener("change", renderBacklog));
     document.getElementById("filterCategory").addEventListener("change", renderBacklog);
+    document.getElementById("filterOwner").addEventListener("change", renderBacklog);
     document.getElementById("sortDeadline").addEventListener("change", renderBacklog);
     document.getElementById("backlogColumns").addEventListener("click", (e) => {
       const card = e.target.closest(".card");
@@ -402,6 +403,7 @@
         commentsCount: issue.comments || 0,
       }));
       renderCategoryFilterOptions();
+      renderOwnerFilterOptions();
       renderBacklog();
       setBacklogStatus("");
     } catch (e) {
@@ -442,6 +444,23 @@
     if (categories.includes(current)) sel.value = current;
   }
 
+  function getBacklogOwners() {
+    const set = new Set();
+    state.backlogItems.forEach((item) => {
+      const o = (item.data.owner || "").trim();
+      if (o) set.add(o);
+    });
+    return [...set].sort((a, b) => a.localeCompare(b, "zh-Hant"));
+  }
+
+  function renderOwnerFilterOptions() {
+    const sel = document.getElementById("filterOwner");
+    const current = sel.value;
+    const owners = getBacklogOwners();
+    sel.innerHTML = `<option value="">全部負責人</option>` + owners.map((o) => `<option value="${escapeHTML(o)}">${escapeHTML(o)}</option>`).join("");
+    if (owners.includes(current)) sel.value = current;
+  }
+
   function backlogCardHTML(item) {
     const d = item.data;
     const urgency = getUrgency(d.deadline, d.status);
@@ -465,12 +484,14 @@
       [...document.querySelectorAll(".status-filter-cb:checked")].map((cb) => cb.value)
     );
     const categoryFilter = document.getElementById("filterCategory").value;
+    const ownerFilter = document.getElementById("filterOwner").value;
     const sortDir = document.getElementById("sortDeadline").value;
 
     const cols = { pending: [], doing: [], done: [], void: [] };
     state.backlogItems.forEach((item) => {
       const st = STATUS[item.data.status] ? item.data.status : "pending";
       if (!selectedStatuses.has(st)) return;
+      if (ownerFilter && (item.data.owner || "") !== ownerFilter) return;
       if (categoryFilter && (item.data.category || "") !== categoryFilter) return;
       cols[st].push(item);
     });
