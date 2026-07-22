@@ -135,32 +135,25 @@
       <div id="uploadErrors" class="upload-errors hidden"></div>
 
       <details class="field-drawer" id="phaseDrawer">
-        <summary>測試階段設定</summary>
+        <summary>測試設定</summary>
         <div class="field-manage">
           <div class="form-row">
-            <label>全域預設「基本測試天數」（單一功能項目未個別設定時使用）</label>
+            <label>全域預設「基本測試天數」（單一功能項目未個別設定時使用）。風險判斷方式：「交測客戶日期」－「預計開發交付時程」的可測試天數，若小於這個天數就標示風險。</label>
             <input type="number" min="0" id="defaultTestDaysInput" class="num-input" style="width:100px">
           </div>
-          <div class="table-wrap">
-            <table class="daily-table">
-              <thead>
-                <tr>
-                  <th>交付階段</th>
-                  <th>FT 預計完成日</th>
-                  <th>SIT 預計完成日</th>
-                </tr>
-              </thead>
-              <tbody id="phaseSettingsBody">
-                <tr><td colspan="3" class="empty-hint">尚未載入資料</td></tr>
-              </tbody>
-            </table>
-          </div>
           <div class="form-actions" style="margin-top:14px;">
-            <button type="button" class="btn-primary" id="savePhaseSettingsBtn">儲存階段設定</button>
+            <button type="button" class="btn-primary" id="savePhaseSettingsBtn">儲存設定</button>
           </div>
           <span class="status-msg" id="phaseStatusMsg"></span>
         </div>
       </details>
+
+      <div class="dashboard-panel">
+        <div class="summary-title">依交測客戶日期分群</div>
+        <div class="table-wrap" id="customerTestMonthSummary">
+          <div class="empty-hint">載入中…</div>
+        </div>
+      </div>
 
       <div class="overview-grid" id="testingOverview">
         <div class="empty-hint">載入中…</div>

@@ -43,45 +43,37 @@
   // Excel 範本欄位：key 是內部資料欄位名，header 是 Excel 表頭文字（比照
   // 《SIT測試管理五大表格.xlsx》「1A_測試情境庫(TS) _團險」工作表欄位順序）。
   const TEST_TEMPLATE_COLUMNS = [
-    { key: "teamIt", header: "團+IT" },
-    { key: "fglTest", header: "FGL交測" },
-    { key: "passDate", header: "預計完成日(測試通過)" },
+    { key: "customerTestDate", header: "交測客戶日期" },
     { key: "seq", header: "序號" },
     { key: "fsd", header: "FSD" },
-    { key: "fsdName", header: "FSD名稱" },
+    { key: "fsdName", header: "FSD名字" },
     { key: "layer1", header: "第一層" },
     { key: "layer2", header: "第二層" },
     { key: "itemType", header: "類型" },
-    { key: "subType", header: "細分類" },
-    { key: "id", header: "測試情境ID" },
-    { key: "deliveryPhase", header: "交付階段" },
-    { key: "plannedDeliveryDate", header: "預計交付時程" },
-    { key: "actualDeliveryDate", header: "實際交付時程" },
-    { key: "deliveryNote", header: "交付備註" },
+    { key: "backendOwner", header: "後端負責人" },
+    { key: "frontendOwner", header: "前端負責人" },
+    { key: "id", header: "測試情境 ID" },
+    { key: "plannedDeliveryDate", header: "預計開發交付時程" },
+    { key: "actualDeliveryDate", header: "實際開發交付時程" },
     { key: "deliveryStatus", header: "交付狀態" },
-    { key: "ftTestDate", header: "FT測試完成日期" },
+    { key: "ftTestDate", header: "FT 測試完成日期" },
     { key: "ftStatus", header: "FT測試狀態" },
-    { key: "ftNote", header: "FT備註" },
-    { key: "dependency", header: "相依外圍介接工項" },
-    { key: "techCheck", header: "Tech盤點(介接)" },
-    { key: "interfaceItem", header: "介接" },
-    { key: "interfaceDeliveryStatus", header: "介接交付狀態" },
-    { key: "sitTestDate", header: "SIT測試完成日期" },
+    { key: "ftNote", header: "FT 備註" },
+    { key: "sitTestDate", header: "SIT 測試完成日期" },
     { key: "sitStatus", header: "SIT測試狀態" },
-    { key: "tcCount", header: "TC數量" },
-    { key: "sitNote", header: "SIT備註" },
+    { key: "tcCount", header: "TC 數量" },
+    { key: "sitNote", header: "SIT 備註" },
     { key: "testSA", header: "測試SA" },
   ];
-  // 範本必須包含的欄位（表頭檢查用）。實測參考資料顯示：FSD/測試情境ID 幾乎不會
-  // 空白，但預計交付時程/交付狀態/FT/SIT 狀態在真實資料中常見空白（未排程、尚未測試等
-  // 合理狀態），所以「欄位必須存在」跟「每列不可空白」分開處理，見 ROW_REQUIRED_KEYS。
+  // 範本必須包含的欄位（表頭檢查用）。交測客戶日期是新欄位、實測資料常常還沒開始填，
+  // 所以不列進「表頭必須存在」的必要清單，避免舊格式檔案上傳被擋。
   const REQUIRED_TEST_FIELD_KEYS = [
     "fsd", "fsdName", "layer1", "layer2", "id",
     "plannedDeliveryDate", "deliveryStatus", "ftStatus", "sitStatus",
   ];
   // 每一列真正不可空白的欄位（沒有就無法辨識這是哪個模組/哪個功能項目）。
   const ROW_REQUIRED_KEYS = ["fsd", "id"];
-  const TEST_DATE_FIELD_KEYS = ["plannedDeliveryDate", "actualDeliveryDate", "ftTestDate", "sitTestDate", "passDate"];
+  const TEST_DATE_FIELD_KEYS = ["customerTestDate", "plannedDeliveryDate", "actualDeliveryDate", "ftTestDate", "sitTestDate"];
   const NO_TEST_NEEDED = "不需測試";
 
   const state = {
@@ -99,7 +91,7 @@
     dashboardGranularity: "week",
     testBatches: [], // [{number, fsd, fsdName, items: [...]}]
     testItems: [], // 攤平後的所有 item，each item 帶 _batchNumber/_fsd/_fsdName 反查用
-    phaseSettings: { number: null, defaultTestDays: 3, phases: [] },
+    phaseSettings: { number: null, defaultTestDays: 3 },
     testingLoaded: false,
     testingExpandedFsd: null,
   };
@@ -173,36 +165,32 @@
     return d.toISOString().slice(0, 10);
   }
 
-  function findPhaseSetting(phaseSettings, phase) {
-    return (phaseSettings.phases || []).find((p) => p.phase === phase) || null;
+  function isStatusDone(status) {
+    return status === "測試通過" || status === NO_TEST_NEEDED;
   }
 
-  // 依「該功能交付時程」+「基本測試天數」，用該測試階段完成日回推預計測試時程，
-  // 並判斷「可測試期間 < 基本測試天數」的風險。stage 為 'ft' 或 'sit'。
-  function computeSchedule(item, phaseSettings, stage) {
-    const statusKey = stage === "ft" ? "ftStatus" : "sitStatus";
-    const dateKey = stage === "ft" ? "ftDueDate" : "sitDueDate";
-    const status = item[statusKey];
+  // 直接比較「交測客戶日期」(deadline) 與「預計開發交付時程」(測試可以開始的時間點)，
+  // 判斷可測試天數是否小於基本測試天數。FT/SIT 都不需要測試時完全略過風險判斷。
+  function computeSchedule(item, phaseSettings) {
+    if (isStatusDone(item.ftStatus) && isStatusDone(item.sitStatus)
+      && item.ftStatus === NO_TEST_NEEDED && item.sitStatus === NO_TEST_NEEDED) {
+      return { scheduled: true, risk: false, bothNotNeeded: true };
+    }
+    if (!item.customerTestDate || !item.plannedDeliveryDate) {
+      return { scheduled: false, reason: "no-date", risk: false };
+    }
 
-    if (!item.deliveryPhase) return { scheduled: false, reason: "no-phase", risk: false };
-    const setting = findPhaseSetting(phaseSettings, item.deliveryPhase);
-    const dueDate = setting ? setting[dateKey] : null;
-    if (!dueDate) return { scheduled: false, reason: "no-due-date", risk: false };
-    if (!item.plannedDeliveryDate) return { scheduled: false, reason: "no-delivery-date", risk: false };
-
-    const availableDays = daysBetween(item.plannedDeliveryDate, dueDate);
+    const availableDays = daysBetween(item.plannedDeliveryDate, item.customerTestDate);
     const testDays = Number.isFinite(item.testDays) ? item.testDays : phaseSettings.defaultTestDays;
-    const skipRisk = status === NO_TEST_NEEDED;
-    const risk = !skipRisk && availableDays !== null && availableDays < testDays;
-    const windowStart = addDays(dueDate, -testDays);
+    const risk = availableDays !== null && availableDays < testDays;
+    const windowStart = addDays(item.customerTestDate, -testDays);
 
     return {
       scheduled: true,
-      dueDate,
       testDays,
       availableDays,
       windowStart,
-      windowEnd: dueDate,
+      windowEnd: item.customerTestDate,
       risk,
     };
   }
@@ -1277,33 +1265,23 @@
       setTestingStatus("讀取失敗：" + e.message, true);
       document.getElementById("testingOverview").innerHTML =
         `<div class="empty-hint error">無法載入交付/測試資料：${escapeHTML(e.message)}</div>`;
+      document.getElementById("customerTestMonthSummary").innerHTML =
+        `<div class="empty-hint error">無法載入交付/測試資料：${escapeHTML(e.message)}</div>`;
     }
-  }
-
-  function syncPhaseListWithData() {
-    const known = new Set(state.phaseSettings.phases.map((p) => p.phase));
-    state.testItems.forEach((it) => {
-      if (it.deliveryPhase && !known.has(it.deliveryPhase)) {
-        state.phaseSettings.phases.push({ phase: it.deliveryPhase, ftDueDate: "", sitDueDate: "" });
-        known.add(it.deliveryPhase);
-      }
-    });
   }
 
   async function loadPhaseSettings() {
     try {
       const issues = await ghFetch(`/issues?labels=${enc(LABEL.testPhaseSetting)}&state=open&per_page=100`);
       if (issues.length === 0) {
-        state.phaseSettings = { number: null, defaultTestDays: 3, phases: [] };
+        state.phaseSettings = { number: null, defaultTestDays: 3 };
       } else {
         const d = extractData(issues[0].body) || {};
         state.phaseSettings = {
           number: issues[0].number,
           defaultTestDays: Number.isFinite(d.defaultTestDays) ? d.defaultTestDays : 3,
-          phases: Array.isArray(d.phases) ? d.phases : [],
         };
       }
-      syncPhaseListWithData();
       renderPhaseSettingsForm();
       renderTestingOverview();
     } catch (e) {
@@ -1313,32 +1291,12 @@
 
   function renderPhaseSettingsForm() {
     document.getElementById("defaultTestDaysInput").value = state.phaseSettings.defaultTestDays;
-    const tbody = document.getElementById("phaseSettingsBody");
-    tbody.innerHTML = state.phaseSettings.phases.length
-      ? state.phaseSettings.phases.map((p) => `
-          <tr data-phase="${escapeHTML(p.phase)}">
-            <td>${escapeHTML(p.phase)}</td>
-            <td><input type="date" class="num-input" style="width:150px" data-phase-field="ftDueDate" value="${escapeHTML(p.ftDueDate || "")}"></td>
-            <td><input type="date" class="num-input" style="width:150px" data-phase-field="sitDueDate" value="${escapeHTML(p.sitDueDate || "")}"></td>
-          </tr>`).join("")
-      : `<tr><td colspan="3" class="empty-hint">尚未有資料中的交付階段可設定，請先上傳 Excel</td></tr>`;
   }
 
   async function onSavePhaseSettings() {
     const defaultTestDays = Number(document.getElementById("defaultTestDaysInput").value) || 0;
-    const phases = [];
-    document.querySelectorAll("#phaseSettingsBody tr[data-phase]").forEach((tr) => {
-      phases.push({
-        phase: tr.dataset.phase,
-        ftDueDate: tr.querySelector('[data-phase-field="ftDueDate"]').value || "",
-        sitDueDate: tr.querySelector('[data-phase-field="sitDueDate"]').value || "",
-      });
-    });
-    const dataObj = { defaultTestDays, phases };
-    const body = buildBody(dataObj, [
-      `**全域預設基本測試天數**：${defaultTestDays}`,
-      ...phases.map((p) => `**${p.phase} 階段**：FT ${p.ftDueDate || "-"}／SIT ${p.sitDueDate || "-"}`),
-    ]);
+    const dataObj = { defaultTestDays };
+    const body = buildBody(dataObj, [`**全域預設基本測試天數**：${defaultTestDays}`]);
 
     const btn = document.getElementById("savePhaseSettingsBtn");
     btn.disabled = true;
@@ -1349,12 +1307,11 @@
       } else {
         const issue = await ghFetch("/issues", {
           method: "POST",
-          body: JSON.stringify({ title: "[test-phase-setting] 測試階段設定", body, labels: [LABEL.testPhaseSetting] }),
+          body: JSON.stringify({ title: "[test-phase-setting] 測試設定", body, labels: [LABEL.testPhaseSetting] }),
         });
         state.phaseSettings.number = issue.number;
       }
       state.phaseSettings.defaultTestDays = defaultTestDays;
-      state.phaseSettings.phases = phases;
       renderTestingOverview();
       setPhaseStatus("已儲存 ✓");
       setTimeout(() => setPhaseStatus(""), 1500);
@@ -1365,8 +1322,45 @@
     btn.disabled = false;
   }
 
+  // 依「交測客戶日期」月份分群，橫向月份、直向已交付/未交付；已交付＝已超過交測客戶
+  // 日期且 FT/SIT 都測試通過（或不需測試）。沒填交測客戶日期的項目無法歸月份，不計入。
+  function groupByCustomerTestMonth() {
+    const buckets = {};
+    const today = todayStr();
+    state.testItems.forEach((it) => {
+      if (!it.customerTestDate) return;
+      const month = it.customerTestDate.slice(0, 7);
+      if (!buckets[month]) buckets[month] = { delivered: 0, pending: 0 };
+      const ftDone = isStatusDone(it.ftStatus);
+      const sitDone = isStatusDone(it.sitStatus);
+      const delivered = today > it.customerTestDate && ftDone && sitDone;
+      buckets[month][delivered ? "delivered" : "pending"]++;
+    });
+    return Object.keys(buckets).sort().map((m) => ({ month: m, ...buckets[m] }));
+  }
+
+  function renderCustomerTestMonthSummary() {
+    const el = document.getElementById("customerTestMonthSummary");
+    const rows = groupByCustomerTestMonth();
+    if (rows.length === 0) {
+      el.innerHTML = '<div class="empty-hint">尚無資料，請先在 Excel 填上「交測客戶日期」</div>';
+      return;
+    }
+    el.innerHTML = `
+      <table class="daily-table">
+        <thead>
+          <tr><th>月份</th>${rows.map((r) => `<th>${escapeHTML(r.month)}</th>`).join("")}</tr>
+        </thead>
+        <tbody>
+          <tr><td>已交付</td>${rows.map((r) => `<td>${r.delivered}</td>`).join("")}</tr>
+          <tr><td>未交付</td>${rows.map((r) => `<td>${r.pending}</td>`).join("")}</tr>
+        </tbody>
+      </table>`;
+  }
+
   function renderTestingOverview() {
     const container = document.getElementById("testingOverview");
+    renderCustomerTestMonthSummary();
     if (!state.testingLoaded) return;
     if (state.testBatches.length === 0) {
       container.innerHTML = '<div class="empty-hint">尚無交付/測試資料，請先用「上傳 Excel 更新」匯入</div>';
@@ -1410,6 +1404,7 @@
     let sitPassed = 0;
     let needSitTcCount = 0;
     let riskCount = 0;
+    const completion = { both: 0, ftOnly: 0, pending: 0 };
 
     items.forEach((it) => {
       deliveryCounts[classifyDeliveryStatus(it.deliveryStatus)]++;
@@ -1422,9 +1417,14 @@
       if (it.sitStatus !== NO_TEST_NEEDED && (it.tcCount === null || it.tcCount === undefined || it.tcCount === "")) {
         needSitTcCount++;
       }
-      const ft = computeSchedule(it, state.phaseSettings, "ft");
-      const sit = computeSchedule(it, state.phaseSettings, "sit");
-      if (ft.risk || sit.risk) riskCount++;
+      const ftDone = isStatusDone(it.ftStatus);
+      const sitDone = isStatusDone(it.sitStatus);
+      if (ftDone && sitDone) completion.both++;
+      else if (ftDone) completion.ftOnly++;
+      else completion.pending++;
+
+      const sched = computeSchedule(it, state.phaseSettings);
+      if (sched.risk) riskCount++;
     });
 
     const riskyKeys = ["測試失敗", "測試阻塞"];
@@ -1467,6 +1467,15 @@
           <div class="stat-pills">${pillsHTML(sitCounts)}</div>
         </div>
 
+        <div class="stat-group">
+          <div class="stat-group-label">測試完成度</div>
+          <div class="stat-pills">
+            <span class="stat-pill done">皆已測通 ${completion.both}</span>
+            <span class="stat-pill warn">只測通FT尚待SIT ${completion.ftOnly}</span>
+            <span class="stat-pill danger">尚未完成 ${completion.pending}</span>
+          </div>
+        </div>
+
         <div class="item-detail-wrap ${expanded ? "" : "hidden"}">
           ${expanded ? renderItemDetailTable(batch, items) : ""}
         </div>
@@ -1476,14 +1485,13 @@
 
   function renderItemDetailTable(batch, items) {
     const scheduleText = (item, s) => {
-      if (!item.deliveryPhase) return '<span class="item-phase-empty">未設定交付階段</span>';
-      if (!s.scheduled) return '<span class="item-phase-empty">尚未設定完成日</span>';
+      if (s.bothNotNeeded) return '<span class="item-phase-empty">FT/SIT 皆不需測試</span>';
+      if (!s.scheduled) return '<span class="item-phase-empty">未設定交測客戶日期</span>';
       return `${escapeHTML(s.windowStart || "-")} ~ ${escapeHTML(s.windowEnd)}${s.risk ? ' <span class="risk-badge">風險</span>' : ""}`;
     };
 
     const rows = items.map((it) => {
-      const ft = computeSchedule(it, state.phaseSettings, "ft");
-      const sit = computeSchedule(it, state.phaseSettings, "sit");
+      const sched = computeSchedule(it, state.phaseSettings);
       return `
         <tr data-item-id="${escapeHTML(it.id)}">
           <td>${escapeHTML(it.id)}</td>
@@ -1491,8 +1499,7 @@
           <td>${escapeHTML(it.deliveryStatus || "-")}</td>
           <td>${escapeHTML(it.ftStatus || "-")}</td>
           <td>${escapeHTML(it.sitStatus || "-")}</td>
-          <td>${scheduleText(it, ft)}</td>
-          <td>${scheduleText(it, sit)}</td>
+          <td>${scheduleText(it, sched)}</td>
           <td><input type="number" min="0" class="num-input" data-item-testdays value="${Number.isFinite(it.testDays) ? it.testDays : ""}" placeholder="${state.phaseSettings.defaultTestDays}"></td>
           <td><button type="button" class="btn-save" data-save-testdays="${escapeHTML(batch.number + ":" + it.id)}">儲存</button></td>
         </tr>`;
@@ -1503,7 +1510,7 @@
         <thead>
           <tr>
             <th>測試情境ID</th><th>功能項目</th><th>交付狀態</th><th>FT 狀態</th><th>SIT 狀態</th>
-            <th>FT 預計測試時程</th><th>SIT 預計測試時程</th><th>基本測試天數</th><th></th>
+            <th>預計測試時窗</th><th>基本測試天數</th><th></th>
           </tr>
         </thead>
         <tbody>${rows}</tbody>
@@ -1579,6 +1586,7 @@
   function parseAndValidateRows(dataRows, keyByCol) {
     const records = [];
     const errors = [];
+    let unparseableDateCount = 0;
 
     dataRows.forEach((rowArr, i) => {
       const excelRow = i + 2; // +1 表頭, +1 轉成 1-index
@@ -1597,6 +1605,7 @@
         }
       });
 
+      // 日期欄沒有值、或格式無法辨識，一律視為「無日期」，不阻斷上傳。
       TEST_DATE_FIELD_KEYS.forEach((key) => {
         const val = rec[key];
         if (val === "" || val === null || val === undefined) {
@@ -1604,11 +1613,8 @@
           return;
         }
         const iso = parseExcelDateValue(val);
-        if (!iso) {
-          errors.push({ row: excelRow, field: fieldHeader(key), message: `日期格式無法解析：${val}` });
-        } else {
-          rec[key] = iso;
-        }
+        if (!iso) unparseableDateCount++;
+        rec[key] = iso;
       });
 
       if (rec.tcCount === "" || rec.tcCount === null || rec.tcCount === undefined) {
@@ -1626,7 +1632,7 @@
       records.push(rec);
     });
 
-    return { records, errors };
+    return { records, errors, unparseableDateCount };
   }
 
   function showUploadErrors(errors) {
@@ -1674,19 +1680,18 @@
         const prev = existingItemsById[r.id];
         const nextItem = {
           id: r.id,
+          customerTestDate: r.customerTestDate || null,
           layer1: r.layer1 || "",
           layer2: r.layer2 || "",
           itemType: r.itemType || "",
-          subType: r.subType || "",
-          deliveryPhase: r.deliveryPhase || "",
+          backendOwner: r.backendOwner || "",
+          frontendOwner: r.frontendOwner || "",
           plannedDeliveryDate: r.plannedDeliveryDate || null,
           actualDeliveryDate: r.actualDeliveryDate || null,
-          deliveryNote: r.deliveryNote || "",
           deliveryStatus: r.deliveryStatus || "",
           ftTestDate: r.ftTestDate || null,
           ftStatus: r.ftStatus || "",
           ftNote: r.ftNote || "",
-          dependency: r.dependency || "",
           sitTestDate: r.sitTestDate || null,
           sitStatus: r.sitStatus || "",
           tcCount: r.tcCount,
@@ -1756,7 +1761,7 @@
         throw new Error(`Excel 缺少必要欄位：${missingCols.map(fieldHeader).join("、")}`);
       }
 
-      const { records, errors } = parseAndValidateRows(rows.slice(1), keyByCol);
+      const { records, errors, unparseableDateCount } = parseAndValidateRows(rows.slice(1), keyByCol);
       if (errors.length) {
         showUploadErrors(errors);
         setTestingStatus(`上傳未匯入：發現 ${errors.length} 個錯誤，請修正後重新上傳`, true);
@@ -1769,8 +1774,9 @@
 
       setTestingStatus(`解析成功，共 ${records.length} 列，寫入 GitHub 中…`);
       await mergeAndUploadRecords(records);
-      setTestingStatus("已更新 ✓");
-      setTimeout(() => setTestingStatus(""), 2000);
+      const dateNote = unparseableDateCount > 0 ? `（其中 ${unparseableDateCount} 個日期欄無法辨識，已視為未設定）` : "";
+      setTestingStatus(`已更新 ✓${dateNote}`);
+      setTimeout(() => setTestingStatus(""), unparseableDateCount > 0 ? 4000 : 2000);
     } catch (err) {
       setTestingStatus("上傳失敗：" + err.message, true);
     }
