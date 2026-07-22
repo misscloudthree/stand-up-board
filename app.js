@@ -387,6 +387,13 @@
       if (state.dailyFields.length === 0) loadDailyFields();
     }
     if (tab === "daily") {
+      // 切到這個頁籤時，即使不按「重新整理」也要讓日期跟上系統日（例如分頁開著跨過午夜）。
+      const systemToday = todayStr();
+      if (state.dailyDate !== systemToday) {
+        state.dailyDate = systemToday;
+        document.getElementById("dailyDatePicker").value = systemToday;
+        state.dailyLoaded = false;
+      }
       if (state.modules.length === 0 || state.dailyFields.length === 0) {
         loadModulesAndDaily();
       } else if (!state.dailyLoaded) {
