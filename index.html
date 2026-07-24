@@ -72,11 +72,18 @@
         </label>
 
         <button class="btn-ghost" id="refreshBacklogBtn">重新整理</button>
+
+        <div class="view-toggle" id="backlogViewToggle">
+          <button type="button" class="view-toggle-btn" data-view="card">卡片檢視</button>
+          <button type="button" class="view-toggle-btn" data-view="list">精簡列表檢視</button>
+        </div>
+
         <span class="status-msg" id="backlogStatusMsg"></span>
       </div>
       <div class="board-columns" id="backlogColumns">
         <div class="empty-hint">載入中…</div>
       </div>
+      <div class="backlog-list hidden" id="backlogList"></div>
     </section>
 
     <section id="dailyView" class="tab-view">

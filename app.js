@@ -14,6 +14,7 @@
 
   const LS_TOKEN = "sb_gh_token";
   const LS_NAME = "sb_display_name";
+  const LS_BACKLOG_VIEW = "sb_backlog_view_mode";
 
   const LABEL = {
     backlog: "type:backlog",
@@ -81,6 +82,8 @@
     displayName: localStorage.getItem(LS_NAME) || "",
     tab: "backlog",
     backlogItems: [],
+    backlogViewMode: localStorage.getItem(LS_BACKLOG_VIEW) === "list" ? "list" : "card",
+    backlogExpanded: new Set(), // issue numbers expanded in list view
     modules: [],
     dailyFields: [], // [{number, key, label}]
     dailyDate: todayStr(),
@@ -340,6 +343,13 @@
       const card = e.target.closest(".card");
       if (card) openBacklogDetail(Number(card.dataset.issue));
     });
+    document.getElementById("backlogViewToggle").addEventListener("click", (e) => {
+      const btn = e.target.closest(".view-toggle-btn");
+      if (!btn) return;
+      setBacklogViewMode(btn.dataset.view);
+    });
+    applyBacklogViewToggleUI();
+    document.getElementById("backlogList").addEventListener("click", (e) => onBacklogListClick(e));
 
     document.getElementById("addModuleForm").addEventListener("submit", onAddModuleSubmit);
     document.getElementById("addFieldForm").addEventListener("submit", onAddFieldSubmit);
@@ -503,7 +513,7 @@
       </div>`;
   }
 
-  function renderBacklog() {
+  function getBacklogFilteredItems() {
     const selectedStatuses = new Set(
       [...document.querySelectorAll(".status-filter-cb:checked")].map((cb) => cb.value)
     );
@@ -511,19 +521,59 @@
     const ownerFilter = document.getElementById("filterOwner").value;
     const sortDir = document.getElementById("sortDeadline").value;
 
-    const cols = { pending: [], doing: [], done: [], void: [] };
-    state.backlogItems.forEach((item) => {
+    const items = state.backlogItems.filter((item) => {
       const st = STATUS[item.data.status] ? item.data.status : "pending";
-      if (!selectedStatuses.has(st)) return;
-      if (ownerFilter && (item.data.owner || "") !== ownerFilter) return;
-      if (categoryFilter && (item.data.category || "") !== categoryFilter) return;
+      if (!selectedStatuses.has(st)) return false;
+      if (ownerFilter && (item.data.owner || "") !== ownerFilter) return false;
+      if (categoryFilter && (item.data.category || "") !== categoryFilter) return false;
+      return true;
+    });
+
+    return { items, selectedStatuses, sortDir };
+  }
+
+  function sortByDeadline(items, sortDir) {
+    return [...items].sort((a, b) => {
+      const cmp = (a.data.deadline || "9999-99-99").localeCompare(b.data.deadline || "9999-99-99");
+      return sortDir === "desc" ? -cmp : cmp;
+    });
+  }
+
+  function setBacklogViewMode(mode) {
+    if (mode !== "card" && mode !== "list") return;
+    state.backlogViewMode = mode;
+    localStorage.setItem(LS_BACKLOG_VIEW, mode);
+    applyBacklogViewToggleUI();
+    renderBacklog();
+  }
+
+  function applyBacklogViewToggleUI() {
+    document.querySelectorAll(".view-toggle-btn").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.view === state.backlogViewMode);
+    });
+    document.getElementById("backlogColumns").classList.toggle("hidden", state.backlogViewMode !== "card");
+    document.getElementById("backlogList").classList.toggle("hidden", state.backlogViewMode !== "list");
+  }
+
+  function renderBacklog() {
+    applyBacklogViewToggleUI();
+    if (state.backlogViewMode === "list") {
+      renderBacklogListView();
+    } else {
+      renderBacklogCardView();
+    }
+  }
+
+  function renderBacklogCardView() {
+    const { items, selectedStatuses, sortDir } = getBacklogFilteredItems();
+
+    const cols = { pending: [], doing: [], done: [], void: [] };
+    items.forEach((item) => {
+      const st = STATUS[item.data.status] ? item.data.status : "pending";
       cols[st].push(item);
     });
     Object.keys(cols).forEach((st) => {
-      cols[st].sort((a, b) => {
-        const cmp = (a.data.deadline || "9999-99-99").localeCompare(b.data.deadline || "9999-99-99");
-        return sortDir === "desc" ? -cmp : cmp;
-      });
+      cols[st] = sortByDeadline(cols[st], sortDir);
     });
 
     let pendingWorst = "";
@@ -546,6 +596,113 @@
           </div>
         `).join("")
       : '<div class="empty-hint">請至少勾選一種狀態才會顯示項目</div>';
+  }
+
+  function backlogListRowHTML(item) {
+    const d = item.data;
+    const urgency = getUrgency(d.deadline, d.status);
+    const status = STATUS[d.status] ? d.status : "pending";
+    const expanded = state.backlogExpanded.has(item.number);
+    return `
+      <div class="list-row ${expanded ? "expanded" : ""}" data-issue="${item.number}">
+        <div class="list-row-summary ${urgency.cls}">
+          <span class="list-expand-icon" aria-hidden="true">${expanded ? "▾" : "▸"}</span>
+          <span class="list-col list-title">${escapeHTML(d.content || item.title)}</span>
+          <span class="list-col list-category">${escapeHTML(d.category || "未分類")}</span>
+          <span class="list-col list-owner">👤 ${escapeHTML(d.owner || "未指派")}</span>
+          <span class="list-col list-deadline ${urgency.cls}">${d.deadline ? "⏰ " + escapeHTML(d.deadline) : "-"}${urgency.tag ? " · " + urgency.tag : ""}</span>
+          <span class="list-col list-status">${STATUS[status].label}</span>
+        </div>
+        <div class="list-row-detail" id="listDetail-${item.number}">
+          ${expanded ? backlogListDetailHTML(item) : ""}
+        </div>
+      </div>`;
+  }
+
+  function backlogListDetailHTML(item) {
+    const d = item.data;
+    return `
+      <div class="list-detail-fields">
+        <div class="detail-field"><span class="detail-label">議題內容</span><div class="detail-value">${escapeHTML(d.content || item.title)}</div></div>
+        <div class="detail-field"><span class="detail-label">類型</span><div class="detail-value">${escapeHTML(d.category || "未分類")}</div></div>
+        <div class="detail-field"><span class="detail-label">負責人</span><div class="detail-value">${escapeHTML(d.owner || "未指派")}</div></div>
+        <div class="detail-field"><span class="detail-label">Deadline</span><div class="detail-value">${escapeHTML(d.deadline || "未設定")}</div></div>
+        <div class="detail-field"><span class="detail-label">狀態</span><div class="detail-value">${STATUS[d.status]?.label || d.status}</div></div>
+        <div class="detail-field"><span class="detail-label">提出人</span><div class="detail-value">${escapeHTML(d.submitter || "-")}　·　站會提出日：${escapeHTML(d.createdDate || "-")}</div></div>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn-ghost" data-action="edit-issue" data-issue="${item.number}">編輯</button>
+      </div>
+      <hr style="border-color: var(--hairline); margin: 14px 0;">
+      <div class="form-row"><label>留言 / 處理進度</label></div>
+      <div class="comment-list" id="listCommentList-${item.number}"><div class="empty-hint">載入留言中…</div></div>
+      <div class="form-row">
+        <textarea id="listNewComment-${item.number}" placeholder="輸入留言，記錄討論內容或處理進度…"></textarea>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn-primary" data-action="post-list-comment" data-issue="${item.number}">送出留言</button>
+      </div>`;
+  }
+
+  function renderBacklogListView() {
+    const { items, sortDir } = getBacklogFilteredItems();
+    const sorted = sortByDeadline(items, sortDir);
+    const container = document.getElementById("backlogList");
+    container.innerHTML = sorted.length
+      ? sorted.map(backlogListRowHTML).join("")
+      : '<div class="empty-hint">目前沒有符合條件的項目</div>';
+
+    sorted.forEach((item) => {
+      if (state.backlogExpanded.has(item.number)) refreshComments(item.number, `listCommentList-${item.number}`);
+    });
+  }
+
+  function onBacklogListClick(e) {
+    const editBtn = e.target.closest("[data-action='edit-issue']");
+    if (editBtn) {
+      openBacklogDetail(Number(editBtn.dataset.issue));
+      return;
+    }
+    const postBtn = e.target.closest("[data-action='post-list-comment']");
+    if (postBtn) {
+      submitListComment(Number(postBtn.dataset.issue), postBtn);
+      return;
+    }
+    const summary = e.target.closest(".list-row-summary");
+    if (summary) {
+      const row = summary.closest(".list-row");
+      const issueNumber = Number(row.dataset.issue);
+      const item = state.backlogItems.find((i) => i.number === issueNumber);
+      if (!item) return;
+      const willExpand = !state.backlogExpanded.has(issueNumber);
+      if (willExpand) {
+        state.backlogExpanded.add(issueNumber);
+      } else {
+        state.backlogExpanded.delete(issueNumber);
+      }
+      row.classList.toggle("expanded", willExpand);
+      row.querySelector(".list-expand-icon").textContent = willExpand ? "▾" : "▸";
+      const detailEl = row.querySelector(".list-row-detail");
+      detailEl.innerHTML = willExpand ? backlogListDetailHTML(item) : "";
+      if (willExpand) refreshComments(issueNumber, `listCommentList-${issueNumber}`);
+    }
+  }
+
+  async function submitListComment(issueNumber, btn) {
+    const textarea = document.getElementById(`listNewComment-${issueNumber}`);
+    const text = textarea.value.trim();
+    if (!text) return;
+    btn.disabled = true;
+    try {
+      await postComment(issueNumber, text);
+      textarea.value = "";
+      await refreshComments(issueNumber, `listCommentList-${issueNumber}`);
+      const item = state.backlogItems.find((i) => i.number === issueNumber);
+      if (item) item.commentsCount = (item.commentsCount || 0) + 1;
+    } catch (err) {
+      alert("送出留言失敗：" + err.message);
+    }
+    btn.disabled = false;
   }
 
   function openAddBacklogModal() {
@@ -716,8 +873,8 @@
     refreshComments(issueNumber);
   }
 
-  async function refreshComments(issueNumber) {
-    const el = document.getElementById("commentList");
+  async function refreshComments(issueNumber, elId) {
+    const el = document.getElementById(elId || "commentList");
     if (!el) return;
     try {
       const comments = await ghFetch(`/issues/${issueNumber}/comments?per_page=100`);

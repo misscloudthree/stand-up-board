@@ -359,6 +359,116 @@ main{ padding: 20px 24px 60px; max-width: 1280px; margin: 0 auto; }
 }
 .empty-hint.error{ color: var(--status-danger); }
 
+/* ---------- Backlog view toggle ---------- */
+.view-toggle{
+  display:flex;
+  gap: 6px;
+}
+.view-toggle-btn{
+  background: transparent;
+  border: 1px solid var(--hairline);
+  color: var(--text-muted);
+  padding: 6px 14px;
+  border-radius: 999px;
+  cursor:pointer;
+  font-size: 12px;
+  font-weight: 500;
+}
+.view-toggle-btn.active{
+  background: var(--status-doing);
+  border-color: var(--status-doing);
+  color: #06201d;
+  font-weight: 600;
+}
+
+/* ---------- Backlog list view ---------- */
+.backlog-list{
+  display:flex;
+  flex-direction:column;
+  gap: 8px;
+}
+.list-row{
+  background: var(--panel);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.list-row-summary{
+  display:flex;
+  align-items:center;
+  gap: 12px;
+  padding: 10px 14px;
+  cursor:pointer;
+}
+.list-row-summary:hover{ background: var(--panel-2); }
+.list-row-summary.warn{ border-left: 3px solid var(--status-warn); }
+.list-row-summary.danger{ border-left: 3px solid var(--status-danger); }
+.list-expand-icon{
+  color: var(--text-muted);
+  font-size: 11px;
+  width: 12px;
+  flex: none;
+}
+.list-col{ font-size: 13px; }
+.list-title{
+  flex: 1 1 auto;
+  min-width: 120px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.list-category{
+  flex: none;
+  width: 90px;
+  color: var(--text-muted);
+}
+.list-owner{
+  flex: none;
+  width: 110px;
+  color: var(--text-muted);
+}
+.list-deadline{
+  flex: none;
+  width: 170px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+.list-deadline.warn{ color: var(--status-warn); }
+.list-deadline.danger{ color: var(--status-danger); }
+.list-status{
+  flex: none;
+  width: 64px;
+  color: var(--text-muted);
+  text-align: right;
+}
+.list-row-detail{ padding: 0; }
+.list-row.expanded .list-row-detail{
+  padding: 4px 16px 16px;
+  border-top: 1px solid var(--hairline);
+}
+.list-detail-fields{
+  display:grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px 20px;
+  margin-top: 12px;
+}
+.detail-label{
+  display:block;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 3px;
+}
+.detail-value{
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+@media (max-width: 720px){
+  .list-row-summary{ flex-wrap: wrap; }
+  .list-detail-fields{ grid-template-columns: 1fr; }
+}
+
 /* ---------- Module management ---------- */
 .module-panel{
   background: var(--panel);
