@@ -541,6 +541,14 @@ main{ padding: 20px 24px 60px; max-width: 1280px; margin: 0 auto; }
   font-size: 13px;
 }
 .inline-form input[type="text"]{ min-width: 180px; }
+.inline-form select{
+  background: var(--panel-2);
+  border: 1px solid var(--hairline);
+  color: var(--text);
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+}
 
 .table-wrap{
   background: var(--panel);
@@ -631,6 +639,22 @@ main{ padding: 20px 24px 60px; max-width: 1280px; margin: 0 auto; }
 .summary-label{
   font-size: 12px;
   color: var(--text-muted);
+}
+.summary-item.derived{
+  background: rgba(83,25,231,0.12);
+  border-color: rgba(83,25,231,0.4);
+}
+.summary-item.derived .summary-num{ color: #a78bfa; }
+.summary-derived-tag{
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(83,25,231,0.25);
+  color: #a78bfa;
+  vertical-align: middle;
 }
 
 /* ---------- Daily dashboard ---------- */

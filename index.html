@@ -197,6 +197,25 @@
         </form>
         <span class="status-msg" id="fieldStatusMsg"></span>
       </div>
+
+      <div class="module-panel">
+        <div class="module-panel-title">每日 Summary 衍生指標</div>
+        <p class="help-text">將兩個追蹤項目透過四則運算組合成新指標（例如複測通過率＝複測通過量÷複測數量），只會顯示在「每日測試追蹤」頁籤的 Summary 區塊，不會畫進趨勢圖表。</p>
+        <div class="module-list" id="derivedMetricList"></div>
+        <form id="addMetricForm" class="inline-form">
+          <select id="metricFieldA"></select>
+          <select id="metricOperator">
+            <option value="+">＋</option>
+            <option value="-">－</option>
+            <option value="*">×</option>
+            <option value="/">÷</option>
+          </select>
+          <select id="metricFieldB"></select>
+          <input type="text" id="metricLabel" placeholder="顯示名稱（例如：複測通過率）" required>
+          <button type="submit" class="btn-primary">新增指標</button>
+        </form>
+        <span class="status-msg" id="metricStatusMsg"></span>
+      </div>
     </section>
 
   </main>

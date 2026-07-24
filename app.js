@@ -94,7 +94,7 @@
     dashboardGranularity: "week",
     testBatches: [], // [{number, fsd, fsdName, items: [...]}]
     testItems: [], // 攤平後的所有 item，each item 帶 _batchNumber/_fsd/_fsdName 反查用
-    phaseSettings: { number: null, defaultTestDays: 3 },
+    phaseSettings: { number: null, defaultTestDays: 3, derivedMetrics: [], loaded: false },
     testingLoaded: false,
     testingExpandedFsd: null,
   };
@@ -122,6 +122,37 @@
 
   function makeFieldKey() {
     return "f" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  }
+
+  function makeMetricId() {
+    return "m" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  }
+
+  const METRIC_OPERATORS = {
+    "+": { symbol: "＋", calc: (a, b) => a + b },
+    "-": { symbol: "－", calc: (a, b) => a - b },
+    "*": { symbol: "×", calc: (a, b) => a * b },
+    "/": { symbol: "÷", calc: (a, b) => a / b },
+  };
+
+  // 衍生指標永遠參照欄位 key（不是 label），欄位改名不影響已建立的公式。
+  // 分母為 0、當天完全沒有任何模組填寫資料、或公式引用的欄位已被刪除時，回傳 null（畫面顯示「—」）。
+  function computeDerivedMetric(metric, totals, hasAnyEntries) {
+    if (!hasAnyEntries) return null;
+    const op = METRIC_OPERATORS[metric.operator];
+    const aField = state.dailyFields.find((f) => f.key === metric.aKey);
+    const bField = state.dailyFields.find((f) => f.key === metric.bKey);
+    if (!op || !aField || !bField) return null;
+    const a = totals[metric.aKey];
+    const b = totals[metric.bKey];
+    if (a === undefined || b === undefined) return null;
+    if (metric.operator === "/" && b === 0) return null;
+    return op.calc(a, b);
+  }
+
+  function formatMetricValue(v) {
+    if (v === null || v === undefined || !Number.isFinite(v)) return "—";
+    return String(Math.round(v * 100) / 100);
   }
 
   // 相容舊版資料：舊的每日紀錄把數值直接放在頂層（opened/retested/...），
@@ -373,6 +404,7 @@
     document.getElementById("uploadExcelInput").addEventListener("change", onUploadExcelChange);
     document.getElementById("refreshTestingBtn").addEventListener("click", loadTestingAll);
     document.getElementById("savePhaseSettingsBtn").addEventListener("click", onSavePhaseSettings);
+    document.getElementById("addMetricForm").addEventListener("submit", onAddMetricSubmit);
 
     document.getElementById("granularityToggle").addEventListener("click", (e) => {
       const btn = e.target.closest(".granularity-btn");
@@ -395,6 +427,7 @@
     if (tab === "settings") {
       if (state.modules.length === 0) loadModules();
       if (state.dailyFields.length === 0) loadDailyFields();
+      if (!state.phaseSettings.loaded) loadPhaseSettings();
     }
     if (tab === "daily") {
       // 切到這個頁籤時，即使不按「重新整理」也要讓日期跟上系統日（例如分頁開著跨過午夜）。
@@ -413,6 +446,7 @@
         renderSummary();
       }
       if (!state.dailyHistoryLoaded) loadDailyHistory();
+      if (!state.phaseSettings.loaded) loadPhaseSettings();
     }
     if (tab === "testing" && !state.testingLoaded) loadTestingAll();
   }
@@ -972,6 +1006,8 @@
       state.dailyFields = issues.map(mapFieldIssue).sort((a, b) => a.number - b.number);
       renderFieldList();
       renderDailyTableHead();
+      renderMetricFieldOptions();
+      renderDerivedMetricsList();
       setFieldStatus("");
     } catch (e) {
       setFieldStatus("讀取追蹤項目失敗：" + e.message, true);
@@ -1371,13 +1407,23 @@
   function renderSummary() {
     const totals = {};
     state.dailyFields.forEach((f) => { totals[f.key] = 0; });
+    const hasAnyEntries = Object.keys(state.dailyEntries).length > 0;
     Object.values(state.dailyEntries).forEach((e) => {
       const values = getEntryValues(e.data);
       state.dailyFields.forEach((f) => { totals[f.key] += values[f.key] || 0; });
     });
-    document.getElementById("summaryBoard").innerHTML = state.dailyFields.map((f) => `
+    const rawItemsHTML = state.dailyFields.map((f) => `
       <div class="summary-item"><span class="summary-num">${totals[f.key]}</span><span class="summary-label">${escapeHTML(f.label)}</span></div>
     `).join("");
+    const derivedItemsHTML = (state.phaseSettings.derivedMetrics || []).map((m) => {
+      const value = computeDerivedMetric(m, totals, hasAnyEntries);
+      return `
+        <div class="summary-item derived">
+          <span class="summary-num">${formatMetricValue(value)}</span>
+          <span class="summary-label">${escapeHTML(m.label)}<span class="summary-derived-tag">指標</span></span>
+        </div>`;
+    }).join("");
+    document.getElementById("summaryBoard").innerHTML = rawItemsHTML + derivedItemsHTML;
   }
 
   // =========================================================
@@ -1438,16 +1484,21 @@
     try {
       const issues = await ghFetch(`/issues?labels=${enc(LABEL.testPhaseSetting)}&state=open&per_page=100`);
       if (issues.length === 0) {
-        state.phaseSettings = { number: null, defaultTestDays: 3 };
+        state.phaseSettings = { number: null, defaultTestDays: 3, derivedMetrics: [], loaded: true };
       } else {
         const d = extractData(issues[0].body) || {};
         state.phaseSettings = {
           number: issues[0].number,
           defaultTestDays: Number.isFinite(d.defaultTestDays) ? d.defaultTestDays : 3,
+          derivedMetrics: Array.isArray(d.derivedMetrics) ? d.derivedMetrics : [],
+          loaded: true,
         };
       }
       renderPhaseSettingsForm();
       renderTestingOverview();
+      renderDerivedMetricsList();
+      renderMetricFieldOptions();
+      renderSummary();
     } catch (e) {
       setPhaseStatus("讀取階段設定失敗：" + e.message, true);
     }
@@ -1457,31 +1508,121 @@
     document.getElementById("defaultTestDaysInput").value = state.phaseSettings.defaultTestDays;
   }
 
+  // 統一的持久化入口：把 patch 併進現有 phaseSettings 後整包寫回同一顆 issue，
+  // 這樣「基本測試天數」跟「衍生指標」共用一份設定資料，不會互相覆蓋對方的欄位。
+  async function persistPhaseSettings(patch) {
+    const newData = { ...state.phaseSettings, ...patch };
+    const body = buildBody(
+      { defaultTestDays: newData.defaultTestDays, derivedMetrics: newData.derivedMetrics },
+      [
+        `**全域預設基本測試天數**：${newData.defaultTestDays}`,
+        `**衍生指標數量**：${newData.derivedMetrics.length}`,
+        ...newData.derivedMetrics.map((m) => {
+          const aLabel = state.dailyFields.find((f) => f.key === m.aKey)?.label || m.aKey;
+          const bLabel = state.dailyFields.find((f) => f.key === m.bKey)?.label || m.bKey;
+          return `- ${m.label}：${aLabel} ${METRIC_OPERATORS[m.operator]?.symbol || m.operator} ${bLabel}`;
+        }),
+      ]
+    );
+    if (newData.number) {
+      await ghFetch(`/issues/${newData.number}`, { method: "PATCH", body: JSON.stringify({ body }) });
+    } else {
+      const issue = await ghFetch("/issues", {
+        method: "POST",
+        body: JSON.stringify({ title: "[test-phase-setting] 測試設定", body, labels: [LABEL.testPhaseSetting] }),
+      });
+      newData.number = issue.number;
+    }
+    state.phaseSettings = newData;
+  }
+
   async function onSavePhaseSettings() {
     const defaultTestDays = Number(document.getElementById("defaultTestDaysInput").value) || 0;
-    const dataObj = { defaultTestDays };
-    const body = buildBody(dataObj, [`**全域預設基本測試天數**：${defaultTestDays}`]);
-
     const btn = document.getElementById("savePhaseSettingsBtn");
     btn.disabled = true;
     setPhaseStatus("儲存中…");
     try {
-      if (state.phaseSettings.number) {
-        await ghFetch(`/issues/${state.phaseSettings.number}`, { method: "PATCH", body: JSON.stringify({ body }) });
-      } else {
-        const issue = await ghFetch("/issues", {
-          method: "POST",
-          body: JSON.stringify({ title: "[test-phase-setting] 測試設定", body, labels: [LABEL.testPhaseSetting] }),
-        });
-        state.phaseSettings.number = issue.number;
-      }
-      state.phaseSettings.defaultTestDays = defaultTestDays;
+      await persistPhaseSettings({ defaultTestDays });
       renderTestingOverview();
       setPhaseStatus("已儲存 ✓");
       setTimeout(() => setPhaseStatus(""), 1500);
     } catch (e) {
       alert("儲存階段設定失敗：" + e.message);
       setPhaseStatus("");
+    }
+    btn.disabled = false;
+  }
+
+  function setMetricStatus(msg, isError) {
+    const el = document.getElementById("metricStatusMsg");
+    el.textContent = msg || "";
+    el.classList.toggle("error", !!isError);
+  }
+
+  function renderMetricFieldOptions() {
+    const options = state.dailyFields.map((f) => `<option value="${escapeHTML(f.key)}">${escapeHTML(f.label)}</option>`).join("");
+    ["metricFieldA", "metricFieldB"].forEach((id) => {
+      const sel = document.getElementById(id);
+      const current = sel.value;
+      sel.innerHTML = options;
+      if (state.dailyFields.some((f) => f.key === current)) sel.value = current;
+    });
+  }
+
+  function renderDerivedMetricsList() {
+    const el = document.getElementById("derivedMetricList");
+    const metrics = state.phaseSettings.derivedMetrics || [];
+    el.innerHTML = metrics.length
+      ? metrics.map((m) => {
+          const aLabel = state.dailyFields.find((f) => f.key === m.aKey)?.label || `${m.aKey}（已刪除）`;
+          const bLabel = state.dailyFields.find((f) => f.key === m.bKey)?.label || `${m.bKey}（已刪除）`;
+          const symbol = METRIC_OPERATORS[m.operator]?.symbol || m.operator;
+          return `
+            <span class="module-chip">
+              ${escapeHTML(m.label)}　${escapeHTML(aLabel)} ${symbol} ${escapeHTML(bLabel)}
+              <button type="button" data-remove-metric="${m.id}" title="刪除衍生指標">✕</button>
+            </span>`;
+        }).join("")
+      : '<span class="empty-hint">尚未設定衍生指標</span>';
+
+    el.querySelectorAll("[data-remove-metric]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        if (!confirm("確定要刪除這個衍生指標嗎？")) return;
+        try {
+          const derivedMetrics = (state.phaseSettings.derivedMetrics || []).filter((m) => m.id !== btn.dataset.removeMetric);
+          await persistPhaseSettings({ derivedMetrics });
+          renderDerivedMetricsList();
+          renderSummary();
+        } catch (e) {
+          alert("刪除失敗：" + e.message);
+        }
+      });
+    });
+  }
+
+  async function onAddMetricSubmit(e) {
+    e.preventDefault();
+    const aKey = document.getElementById("metricFieldA").value;
+    const operator = document.getElementById("metricOperator").value;
+    const bKey = document.getElementById("metricFieldB").value;
+    const label = document.getElementById("metricLabel").value.trim();
+    if (!aKey || !bKey || !label) return;
+
+    const metric = { id: makeMetricId(), label, aKey, operator, bKey };
+    const btn = e.target.querySelector("button[type=submit]");
+    btn.disabled = true;
+    setMetricStatus("新增指標中，請稍候…");
+    try {
+      const derivedMetrics = [...(state.phaseSettings.derivedMetrics || []), metric];
+      await persistPhaseSettings({ derivedMetrics });
+      document.getElementById("metricLabel").value = "";
+      renderDerivedMetricsList();
+      renderSummary();
+      setMetricStatus("已新增指標 ✓");
+      setTimeout(() => setMetricStatus(""), 1500);
+    } catch (err) {
+      alert("新增指標失敗：" + err.message);
+      setMetricStatus("");
     }
     btn.disabled = false;
   }
