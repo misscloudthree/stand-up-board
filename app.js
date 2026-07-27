@@ -44,6 +44,7 @@
   // Excel 範本欄位：key 是內部資料欄位名，header 是 Excel 表頭文字（比照
   // 《SIT測試管理五大表格.xlsx》「1A_測試情境庫(TS) _團險」工作表欄位順序）。
   const TEST_TEMPLATE_COLUMNS = [
+    { key: "delivered", header: "是否交測" },
     { key: "customerTestDate", header: "交測客戶日期" },
     { key: "seq", header: "序號" },
     { key: "fsd", header: "FSD" },
@@ -51,6 +52,7 @@
     { key: "layer1", header: "第一層" },
     { key: "layer2", header: "第二層" },
     { key: "itemType", header: "類型" },
+    { key: "subCategory", header: "細分類" },
     { key: "backendOwner", header: "後端負責人" },
     { key: "frontendOwner", header: "前端負責人" },
     { key: "id", header: "測試情境 ID" },
@@ -201,6 +203,11 @@
 
   function isStatusDone(status) {
     return status === "測試通過" || status === NO_TEST_NEEDED;
+  }
+
+  // 「是否交測」欄位只認 Y（大小寫不拘），其他值（含空白）一律視為尚未交測。
+  function isDelivered(flag) {
+    return String(flag || "").trim().toUpperCase() === "Y";
   }
 
   // 直接比較「交測客戶日期」(deadline) 與「預計開發交付時程」(測試可以開始的時間點)，
@@ -1627,19 +1634,23 @@
     btn.disabled = false;
   }
 
-  // 依「交測客戶日期」月份分群，橫向月份、直向已交付/未交付；已交付＝已超過交測客戶
-  // 日期且 FT/SIT 都測試通過（或不需測試）。沒填交測客戶日期的項目無法歸月份，不計入。
+  // 依「交測客戶日期」月份分群，判斷依據是「是否交測」欄位（不是 FT/SIT 測試狀態）：
+  // 已標記 Y＝已交付；還沒標記 Y 但已經超過交測客戶日期＝逾期交測客戶；其餘＝未到期、等待中。
+  // 沒填交測客戶日期的項目無法歸月份，不計入。
   function groupByCustomerTestMonth() {
     const buckets = {};
     const today = todayStr();
     state.testItems.forEach((it) => {
       if (!it.customerTestDate) return;
       const month = it.customerTestDate.slice(0, 7);
-      if (!buckets[month]) buckets[month] = { delivered: 0, pending: 0 };
-      const ftDone = isStatusDone(it.ftStatus);
-      const sitDone = isStatusDone(it.sitStatus);
-      const delivered = today > it.customerTestDate && ftDone && sitDone;
-      buckets[month][delivered ? "delivered" : "pending"]++;
+      if (!buckets[month]) buckets[month] = { delivered: 0, overdue: 0, pending: 0 };
+      if (isDelivered(it.delivered)) {
+        buckets[month].delivered++;
+      } else if (today > it.customerTestDate) {
+        buckets[month].overdue++;
+      } else {
+        buckets[month].pending++;
+      }
     });
     return Object.keys(buckets).sort().map((m) => ({ month: m, ...buckets[m] }));
   }
@@ -1651,16 +1662,21 @@
       el.innerHTML = '<div class="empty-hint">尚無資料，請先在 Excel 填上「交測客戶日期」</div>';
       return;
     }
-    el.innerHTML = `
-      <table class="daily-table">
-        <thead>
-          <tr><th>月份</th>${rows.map((r) => `<th>${escapeHTML(r.month)}</th>`).join("")}</tr>
-        </thead>
-        <tbody>
-          <tr><td>已交付</td>${rows.map((r) => `<td>${r.delivered}</td>`).join("")}</tr>
-          <tr><td>未交付</td>${rows.map((r) => `<td>${r.pending}</td>`).join("")}</tr>
-        </tbody>
-      </table>`;
+    el.innerHTML = rows.map((r) => {
+      const total = r.delivered + r.overdue + r.pending;
+      return `
+        <div class="month-card">
+          <div class="month-card-head">
+            <span class="month-card-month">${escapeHTML(r.month)}</span>
+            <span class="month-card-total">共 ${total} 項</span>
+          </div>
+          <div class="stat-pills">
+            <span class="stat-pill done">已交付 ${r.delivered}</span>
+            <span class="stat-pill danger">逾期交測客戶 ${r.overdue}</span>
+            <span class="stat-pill">未到期 ${r.pending}</span>
+          </div>
+        </div>`;
+    }).join("");
   }
 
   function renderTestingOverview() {
@@ -1703,6 +1719,7 @@
     const rangeText = dates.length ? `${dates[0]} ~ ${dates[dates.length - 1]}` : "未設定";
 
     const deliveryCounts = { overdue: 0, delivered: 0, partial: 0, other: 0 };
+    const customerTestCounts = { delivered: 0, overdue: 0, pending: 0, noDate: 0 };
     const ftCounts = {};
     const sitCounts = {};
     let tcTotal = 0;
@@ -1710,9 +1727,14 @@
     let needSitTcCount = 0;
     let riskCount = 0;
     const completion = { both: 0, ftOnly: 0, pending: 0 };
+    const today = todayStr();
 
     items.forEach((it) => {
       deliveryCounts[classifyDeliveryStatus(it.deliveryStatus)]++;
+      if (!it.customerTestDate) customerTestCounts.noDate++;
+      else if (isDelivered(it.delivered)) customerTestCounts.delivered++;
+      else if (today > it.customerTestDate) customerTestCounts.overdue++;
+      else customerTestCounts.pending++;
       const ftKey = it.ftStatus || "未填";
       const sitKey = it.sitStatus || "未填";
       ftCounts[ftKey] = (ftCounts[ftKey] || 0) + 1;
@@ -1749,31 +1771,44 @@
           <div class="overview-card-range">${escapeHTML(rangeText)}</div>
         </div>
 
-        ${riskCount > 0 ? `<div class="risk-badge">⚠ 測試時程不足 × ${riskCount}</div>` : ""}
-        ${needSitTcCount > 0 ? `<div class="risk-badge" style="background:rgba(240,180,41,0.15);color:var(--status-warn);margin-left:6px;">需要補上 SIT TC × ${needSitTcCount}</div>` : ""}
+        ${riskCount > 0 || needSitTcCount > 0 ? `
+        <div class="card-badges">
+          ${riskCount > 0 ? `<span class="risk-badge">⚠ 測試時程不足 × ${riskCount}</span>` : ""}
+          ${needSitTcCount > 0 ? `<span class="risk-badge risk-badge-warn">需要補上 SIT TC × ${needSitTcCount}</span>` : ""}
+        </div>` : ""}
 
         <div class="stat-group">
-          <div class="stat-group-label">交付狀態（共 ${items.length} 項）</div>
-          <div class="stat-pills">
-            <span class="stat-pill danger">逾期未交付 ${deliveryCounts.overdue}</span>
-            <span class="stat-pill done">已交付 ${deliveryCounts.delivered}</span>
-            <span class="stat-pill warn">部分交付 ${deliveryCounts.partial}</span>
-            <span class="stat-pill">其他/未排程 ${deliveryCounts.other}</span>
+          <div class="stat-group-label delivery">交付狀態<span class="stat-group-count">共 ${items.length} 項</span></div>
+          <div class="stat-tile-row">
+            <div class="stat-tile danger"><span class="stat-tile-num">${deliveryCounts.overdue}</span><span class="stat-tile-label">逾期未交付</span></div>
+            <div class="stat-tile done"><span class="stat-tile-num">${deliveryCounts.delivered}</span><span class="stat-tile-label">已交付</span></div>
+            <div class="stat-tile warn"><span class="stat-tile-num">${deliveryCounts.partial}</span><span class="stat-tile-label">部分交付</span></div>
+            <div class="stat-tile"><span class="stat-tile-num">${deliveryCounts.other}</span><span class="stat-tile-label">其他/未排程</span></div>
           </div>
         </div>
 
         <div class="stat-group">
-          <div class="stat-group-label">FT 測試狀態</div>
+          <div class="stat-group-label customer">交測客戶狀態</div>
+          <div class="stat-tile-row">
+            <div class="stat-tile danger"><span class="stat-tile-num">${customerTestCounts.overdue}</span><span class="stat-tile-label">逾期交測客戶</span></div>
+            <div class="stat-tile done"><span class="stat-tile-num">${customerTestCounts.delivered}</span><span class="stat-tile-label">已交付</span></div>
+            <div class="stat-tile"><span class="stat-tile-num">${customerTestCounts.pending}</span><span class="stat-tile-label">未到期</span></div>
+            <div class="stat-tile"><span class="stat-tile-num">${customerTestCounts.noDate}</span><span class="stat-tile-label">未設日期</span></div>
+          </div>
+        </div>
+
+        <div class="stat-group">
+          <div class="stat-group-label ft">FT 測試狀態</div>
           <div class="stat-pills">${pillsHTML(ftCounts)}</div>
         </div>
 
         <div class="stat-group">
-          <div class="stat-group-label">SIT 測試狀態（TC 總數 ${tcTotal}，已測通 ${sitPassed}）</div>
+          <div class="stat-group-label sit">SIT 測試狀態<span class="stat-group-count">TC 總數 ${tcTotal}，已測通 ${sitPassed}</span></div>
           <div class="stat-pills">${pillsHTML(sitCounts)}</div>
         </div>
 
         <div class="stat-group">
-          <div class="stat-group-label">測試完成度</div>
+          <div class="stat-group-label completion">測試完成度</div>
           <div class="stat-pills">
             <span class="stat-pill done">皆已測通 ${completion.both}</span>
             <span class="stat-pill warn">只測通FT尚待SIT ${completion.ftOnly}</span>
@@ -1786,6 +1821,13 @@
         </div>
       </div>
     `;
+  }
+
+  function customerTestStatusBadge(it) {
+    if (!it.customerTestDate) return '<span class="item-phase-empty">未設定</span>';
+    if (isDelivered(it.delivered)) return '<span class="stat-pill done">已交付</span>';
+    if (todayStr() > it.customerTestDate) return '<span class="stat-pill danger">逾期交測客戶</span>';
+    return '<span class="stat-pill">未到期</span>';
   }
 
   function renderItemDetailTable(batch, items) {
@@ -1801,6 +1843,7 @@
         <tr data-item-id="${escapeHTML(it.id)}">
           <td>${escapeHTML(it.id)}</td>
           <td>${escapeHTML(it.layer1 || "")}${it.layer2 ? "／" + escapeHTML(it.layer2) : ""}</td>
+          <td>${customerTestStatusBadge(it)}</td>
           <td>${escapeHTML(it.deliveryStatus || "-")}</td>
           <td>${escapeHTML(it.ftStatus || "-")}</td>
           <td>${escapeHTML(it.sitStatus || "-")}</td>
@@ -1814,7 +1857,7 @@
       <table class="item-detail-table">
         <thead>
           <tr>
-            <th>測試情境ID</th><th>功能項目</th><th>交付狀態</th><th>FT 狀態</th><th>SIT 狀態</th>
+            <th>測試情境ID</th><th>功能項目</th><th>交測客戶狀態</th><th>交付狀態</th><th>FT 狀態</th><th>SIT 狀態</th>
             <th>預計測試時窗</th><th>基本測試天數</th><th></th>
           </tr>
         </thead>
@@ -1985,10 +2028,12 @@
         const prev = existingItemsById[r.id];
         const nextItem = {
           id: r.id,
+          delivered: r.delivered || "",
           customerTestDate: r.customerTestDate || null,
           layer1: r.layer1 || "",
           layer2: r.layer2 || "",
           itemType: r.itemType || "",
+          subCategory: r.subCategory || "",
           backendOwner: r.backendOwner || "",
           frontendOwner: r.frontendOwner || "",
           plannedDeliveryDate: r.plannedDeliveryDate || null,
