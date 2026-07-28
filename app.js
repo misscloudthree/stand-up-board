@@ -48,7 +48,7 @@
     { key: "customerTestDate", header: "交測客戶日期" },
     { key: "seq", header: "序號" },
     { key: "fsd", header: "FSD" },
-    { key: "fsdName", header: "FSD名字" },
+    { key: "fsdName", header: "FSD名稱" },
     { key: "layer1", header: "第一層" },
     { key: "layer2", header: "第二層" },
     { key: "itemType", header: "類型" },
@@ -56,8 +56,8 @@
     { key: "backendOwner", header: "後端負責人" },
     { key: "frontendOwner", header: "前端負責人" },
     { key: "id", header: "測試情境 ID" },
-    { key: "plannedDeliveryDate", header: "預計開發交付時程" },
-    { key: "actualDeliveryDate", header: "實際開發交付時程" },
+    { key: "plannedDeliveryDate", header: "預計交付時程" },
+    { key: "actualDeliveryDate", header: "實際交付時程" },
     { key: "deliveryStatus", header: "交付狀態" },
     { key: "ftTestDate", header: "FT 測試完成日期" },
     { key: "ftStatus", header: "FT測試狀態" },
@@ -210,7 +210,7 @@
     return String(flag || "").trim().toUpperCase() === "Y";
   }
 
-  // 直接比較「交測客戶日期」(deadline) 與「預計開發交付時程」(測試可以開始的時間點)，
+  // 直接比較「交測客戶日期」(deadline) 與「預計交付時程」(測試可以開始的時間點)，
   // 判斷可測試天數是否小於基本測試天數。FT/SIT 都不需要測試時完全略過風險判斷。
   function computeSchedule(item, phaseSettings) {
     if (isStatusDone(item.ftStatus) && isStatusDone(item.sitStatus)
