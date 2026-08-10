@@ -567,6 +567,35 @@ main{ padding: 20px 24px 60px; max-width: 1280px; margin: 0 auto; }
   border-radius: 999px;
 }
 .module-chip button:hover{ color: var(--status-danger); }
+.module-chip select{
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--ink);
+  font-size: 11px;
+  border-radius: 999px;
+  padding: 2px 6px;
+}
+.chip-rename-input{
+  background: transparent;
+  border: none;
+  color: var(--ink);
+  font-size: 12px;
+  font-family: inherit;
+  width: 9ch;
+  min-width: 60px;
+  padding: 0;
+}
+.chip-rename-input:focus{
+  outline: none;
+  border-bottom: 1px dotted var(--ink-soft);
+}
+.module-group-title{
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  margin: 10px 0 6px;
+}
+.module-group-title:first-child{ margin-top: 0; }
 
 .inline-form{
   display:flex;

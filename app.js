@@ -15,6 +15,8 @@
   const LS_TOKEN = "sb_gh_token";
   const LS_NAME = "sb_display_name";
   const LS_BACKLOG_VIEW = "sb_backlog_view_mode";
+  const LS_SELECTED_DAILY_SYSTEM = "sb_selected_daily_system";
+  const LS_SELECTED_TESTING_SYSTEM = "sb_selected_testing_system";
 
   const LABEL = {
     backlog: "type:backlog",
@@ -23,7 +25,10 @@
     dailyField: "type:daily-field",
     testItemBatch: "type:test-item-batch",
     testPhaseSetting: "type:test-phase-setting",
+    system: "type:system",
   };
+
+  const DEFAULT_SYSTEM_NAME = "旅平險系統";
 
   const STATUS = {
     pending: { label: "待處理" },
@@ -87,14 +92,20 @@
     backlogViewMode: localStorage.getItem(LS_BACKLOG_VIEW) === "list" ? "list" : "card",
     backlogExpanded: new Set(), // issue numbers expanded in list view
     modules: [],
+    systems: [], // [{number, name}]
+    systemsLoaded: false,
+    selectedDailySystem: Number(localStorage.getItem(LS_SELECTED_DAILY_SYSTEM)) || null,
+    selectedTestingSystem: Number(localStorage.getItem(LS_SELECTED_TESTING_SYSTEM)) || null,
     dailyFields: [], // [{number, key, label}]
     dailyDate: todayStr(),
-    dailyEntries: {}, // moduleName -> {number, data}
+    dailyEntries: {}, // moduleId -> {number, data}
+    dailyEntriesOrphaned: [], // 舊格式資料，名稱在目前模組清單裡找不到，無法自動歸戶
     dailyLoaded: false,
-    dailyHistory: [], // [{module, date, values}] 跨所有日期，供趨勢圖表用
+    dailyHistory: [], // [{moduleId, module, date, values}] 跨所有日期，供趨勢圖表用
+    dailyHistoryOrphaned: [],
     dailyHistoryLoaded: false,
     dashboardGranularity: "week",
-    testBatches: [], // [{number, fsd, fsdName, items: [...]}]
+    testBatches: [], // [{number, fsd, fsdName, moduleId, items: [...]}]
     testItems: [], // 攤平後的所有 item，each item 帶 _batchNumber/_fsd/_fsdName 反查用
     phaseSettings: { number: null, defaultTestDays: 3, derivedMetrics: [], loaded: false },
     testingLoaded: false,
@@ -349,12 +360,15 @@
       await ensureLabel(LABEL.dailyField, "fbca04");
       await ensureLabel(LABEL.testItemBatch, "0052cc");
       await ensureLabel(LABEL.testPhaseSetting, "d4c5f9");
+      await ensureLabel(LABEL.system, "6f42c1");
     } catch (e) {
       /* ignore */
     }
 
     state.backlogItems = [];
     state.modules = [];
+    state.systems = [];
+    state.systemsLoaded = false;
     state.dailyFields = [];
     state.dailyHistory = [];
     state.dailyHistoryLoaded = false;
@@ -389,6 +403,7 @@
     applyBacklogViewToggleUI();
     document.getElementById("backlogList").addEventListener("click", (e) => onBacklogListClick(e));
 
+    document.getElementById("addSystemForm").addEventListener("submit", onAddSystemSubmit);
     document.getElementById("addModuleForm").addEventListener("submit", onAddModuleSubmit);
     document.getElementById("addFieldForm").addEventListener("submit", onAddFieldSubmit);
     document.getElementById("refreshDailyBtn").addEventListener("click", () => loadDailyEntries(state.dailyDate));
@@ -396,14 +411,20 @@
       state.dailyDate = e.target.value || todayStr();
       loadDailyEntries(state.dailyDate);
     });
+    document.getElementById("dailySystemSelect").addEventListener("change", (e) => {
+      setSelectedDailySystem(Number(e.target.value) || null);
+    });
     document.getElementById("dailyTableBody").addEventListener("click", (e) => {
       const btn = e.target.closest("[data-action='save-row']");
       if (btn) {
         const tr = btn.closest("tr");
-        saveDailyEntry(tr.dataset.module, btn);
+        saveDailyEntry(Number(tr.dataset.moduleId), btn);
       }
     });
 
+    document.getElementById("testingSystemSelect").addEventListener("change", (e) => {
+      setSelectedTestingSystem(Number(e.target.value) || null);
+    });
     document.getElementById("downloadTemplateBtn").addEventListener("click", downloadTemplate);
     document.getElementById("uploadExcelBtn").addEventListener("click", () => {
       document.getElementById("uploadExcelInput").click();
@@ -447,15 +468,24 @@
       if (state.modules.length === 0 || state.dailyFields.length === 0) {
         loadModulesAndDaily();
       } else if (!state.dailyLoaded) {
+        populateDailySystemSelect();
         loadDailyEntries(state.dailyDate);
       } else {
+        populateDailySystemSelect();
         renderDailyTable();
         renderSummary();
       }
       if (!state.dailyHistoryLoaded) loadDailyHistory();
       if (!state.phaseSettings.loaded) loadPhaseSettings();
     }
-    if (tab === "testing" && !state.testingLoaded) loadTestingAll();
+    if (tab === "testing") {
+      if (!state.testingLoaded) {
+        loadTestingAll();
+      } else {
+        populateTestingSystemSelect();
+        renderTestingOverview();
+      }
+    }
   }
 
   // =========================================================
@@ -959,6 +989,143 @@
   }
 
   // =========================================================
+  // System management
+  // =========================================================
+  function setSystemStatus(msg, isError) {
+    const el = document.getElementById("systemStatusMsg");
+    el.textContent = msg || "";
+    el.classList.toggle("error", !!isError);
+  }
+
+  function mapSystemIssue(issue) {
+    const d = extractData(issue.body) || {};
+    return { number: issue.number, name: d.name || issue.title };
+  }
+
+  async function loadSystems() {
+    try {
+      let issues = await ghFetch(`/issues?labels=${enc(LABEL.system)}&state=open&per_page=100`);
+      if (issues.length === 0) {
+        const body = buildBody({ name: DEFAULT_SYSTEM_NAME }, [`**系統名稱**：${DEFAULT_SYSTEM_NAME}`]);
+        await ghFetch("/issues", {
+          method: "POST",
+          body: JSON.stringify({ title: `[system] ${DEFAULT_SYSTEM_NAME}`, body, labels: [LABEL.system] }),
+        });
+        issues = await ghFetch(`/issues?labels=${enc(LABEL.system)}&state=open&per_page=100`);
+      }
+      state.systems = issues.map(mapSystemIssue).sort((a, b) => a.number - b.number);
+      state.systemsLoaded = true;
+      await backfillModuleSystems();
+      renderSystemList();
+    } catch (e) {
+      setSystemStatus("讀取系統失敗：" + e.message, true);
+    }
+  }
+
+  // 第一次啟用系統管理時，把還沒有 system 欄位的既有模組全部歸進第一個系統，
+  // 讓使用者不會看到「未分類」模組。
+  async function backfillModuleSystems() {
+    if (!state.systems.length) return;
+    const defaultSystem = state.systems[0].number;
+    const toBackfill = state.modules.filter((m) => !m.data.system);
+    for (const m of toBackfill) {
+      const newData = { ...m.data, system: defaultSystem };
+      try {
+        const body = buildBody(newData, [
+          `**負責人**：${(newData.owners || []).join("、") || "-"}`,
+          `**所屬系統**：${systemNameOf(defaultSystem)}`,
+        ]);
+        await ghFetch(`/issues/${m.number}`, { method: "PATCH", body: JSON.stringify({ body }) });
+        m.data = newData;
+      } catch (e) {
+        /* 下次載入再試 */
+      }
+    }
+  }
+
+  function renderSystemList() {
+    const el = document.getElementById("systemList");
+    el.innerHTML = state.systems.length
+      ? state.systems.map((s) => `
+          <span class="module-chip" data-system-chip="${s.number}">
+            <input type="text" class="chip-rename-input" data-rename-system="${s.number}" value="${escapeHTML(s.name)}">
+            <button type="button" data-remove-system="${s.number}" title="刪除系統">✕</button>
+          </span>`).join("")
+      : '<span class="empty-hint">還沒有系統，於下方新增一個開始分類模組</span>';
+
+    el.querySelectorAll("[data-rename-system]").forEach((input) => {
+      const commit = async () => {
+        const num = Number(input.dataset.renameSystem);
+        const sys = state.systems.find((s) => s.number === num);
+        const newName = input.value.trim();
+        if (!sys || !newName || newName === sys.name) {
+          input.value = sys ? sys.name : input.value;
+          return;
+        }
+        try {
+          const body = buildBody({ name: newName }, [`**系統名稱**：${newName}`]);
+          await ghFetch(`/issues/${num}`, { method: "PATCH", body: JSON.stringify({ body }) });
+          sys.name = newName;
+          renderModuleList();
+        } catch (e) {
+          alert("改名失敗：" + e.message);
+          input.value = sys.name;
+        }
+      };
+      input.addEventListener("blur", commit);
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") input.blur();
+      });
+    });
+
+    el.querySelectorAll("[data-remove-system]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const num = Number(btn.dataset.removeSystem);
+        if (state.modules.some((m) => m.data.system === num)) {
+          alert("這個系統底下還有模組，請先把模組搬到別的系統再刪除。");
+          return;
+        }
+        if (!confirm("確定要刪除這個系統嗎？")) return;
+        try {
+          await ghFetch(`/issues/${num}`, { method: "PATCH", body: JSON.stringify({ state: "closed" }) });
+          await loadSystems();
+        } catch (e) {
+          alert("刪除失敗：" + e.message);
+        }
+      });
+    });
+  }
+
+  async function onAddSystemSubmit(e) {
+    e.preventDefault();
+    const name = document.getElementById("newSystemName").value.trim();
+    if (!name) return;
+    const body = buildBody({ name }, [`**系統名稱**：${name}`]);
+    const btn = e.target.querySelector("button[type=submit]");
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "新增中…";
+    setSystemStatus("新增系統中，請稍候…");
+    try {
+      const issue = await ghFetch("/issues", {
+        method: "POST",
+        body: JSON.stringify({ title: `[system] ${name}`, body, labels: [LABEL.system] }),
+      });
+      state.systems.push(mapSystemIssue(issue));
+      document.getElementById("newSystemName").value = "";
+      renderSystemList();
+      renderModuleList();
+      setSystemStatus("已新增系統 ✓");
+      setTimeout(() => setSystemStatus(""), 1500);
+    } catch (err) {
+      alert("新增系統失敗：" + err.message);
+      setSystemStatus("");
+    }
+    btn.disabled = false;
+    btn.textContent = originalText;
+  }
+
+  // =========================================================
   // Module management
   // =========================================================
   function setModuleStatus(msg, isError) {
@@ -979,7 +1146,40 @@
   async function loadModulesAndDaily() {
     await loadModules();
     await loadDailyFields();
+    populateDailySystemSelect();
     await loadDailyEntries(state.dailyDate);
+  }
+
+  // 系統清單裡若已經沒有目前選的系統（例如被刪除），fallback 選第一個系統。
+  function resolveSelectedSystem(currentId) {
+    if (state.systems.some((s) => s.number === currentId)) return currentId;
+    return state.systems[0]?.number ?? null;
+  }
+
+  function populateDailySystemSelect() {
+    const sel = document.getElementById("dailySystemSelect");
+    if (!sel) return;
+    const resolved = resolveSelectedSystem(state.selectedDailySystem);
+    if (resolved !== state.selectedDailySystem) {
+      state.selectedDailySystem = resolved;
+      localStorage.setItem(LS_SELECTED_DAILY_SYSTEM, String(resolved || ""));
+    }
+    sel.innerHTML = state.systems.map((s) =>
+      `<option value="${s.number}" ${s.number === resolved ? "selected" : ""}>${escapeHTML(s.name)}</option>`
+    ).join("");
+  }
+
+  function setSelectedDailySystem(id) {
+    state.selectedDailySystem = id;
+    localStorage.setItem(LS_SELECTED_DAILY_SYSTEM, String(id || ""));
+    renderDailyTable();
+    renderSummary();
+    renderDailyDashboard();
+  }
+
+  // 目前選中系統底下的模組 number 集合，daily 表格/Summary/趨勢圖過濾用。
+  function dailySystemModuleIds() {
+    return new Set(state.modules.filter((m) => m.data.system === state.selectedDailySystem).map((m) => m.number));
   }
 
   // =========================================================
@@ -1096,6 +1296,7 @@
         number: issue.number,
         data: extractData(issue.body) || { name: issue.title, owners: [] },
       }));
+      await loadSystems();
       renderModuleList();
       setModuleStatus("");
     } catch (e) {
@@ -1105,15 +1306,72 @@
     }
   }
 
+  function systemNameOf(systemNumber) {
+    const s = state.systems.find((s) => s.number === systemNumber);
+    return s ? s.name : "未分類";
+  }
+
+  function renderModuleSystemOptions(selectEl, selectedSystem) {
+    selectEl.innerHTML = state.systems.map((s) =>
+      `<option value="${s.number}" ${s.number === selectedSystem ? "selected" : ""}>${escapeHTML(s.name)}</option>`
+    ).join("");
+  }
+
+  function moduleChipHTML(m) {
+    return `
+      <span class="module-chip">
+        ${escapeHTML(m.data.name)}${m.data.owners?.length ? " · " + escapeHTML(m.data.owners.join("、")) : ""}
+        <select data-module-system="${m.number}"></select>
+        <button type="button" data-remove-module="${m.number}" title="移除模組">✕</button>
+      </span>`;
+  }
+
   function renderModuleList() {
     const el = document.getElementById("moduleList");
-    el.innerHTML = state.modules.length
-      ? state.modules.map((m) => `
-          <span class="module-chip">
-            ${escapeHTML(m.data.name)}${m.data.owners?.length ? " · " + escapeHTML(m.data.owners.join("、")) : ""}
-            <button type="button" data-remove-module="${m.number}" title="移除模組">✕</button>
-          </span>`).join("")
-      : '<span class="empty-hint">還沒有模組，於下方新增一個開始追蹤</span>';
+    renderModuleSystemOptions(document.getElementById("newModuleSystem"), state.systems[0]?.number);
+
+    if (!state.modules.length) {
+      el.innerHTML = '<span class="empty-hint">還沒有模組，於下方新增一個開始追蹤</span>';
+      return;
+    }
+
+    const bySystem = {};
+    state.modules.forEach((m) => {
+      const key = m.data.system || "unassigned";
+      if (!bySystem[key]) bySystem[key] = [];
+      bySystem[key].push(m);
+    });
+    const orderedKeys = [
+      ...state.systems.map((s) => s.number).filter((num) => bySystem[num]),
+      ...(bySystem.unassigned ? ["unassigned"] : []),
+    ];
+
+    el.innerHTML = orderedKeys.map((key) => {
+      const title = key === "unassigned" ? "未分類" : systemNameOf(key);
+      return `<div class="module-group-title">${escapeHTML(title)}</div>` +
+        bySystem[key].map(moduleChipHTML).join("");
+    }).join("");
+
+    el.querySelectorAll("[data-module-system]").forEach((sel) => {
+      const num = Number(sel.dataset.moduleSystem);
+      const m = state.modules.find((mm) => mm.number === num);
+      renderModuleSystemOptions(sel, m ? m.data.system : null);
+      sel.addEventListener("change", async () => {
+        const newSystem = Number(sel.value);
+        const newData = { ...m.data, system: newSystem };
+        try {
+          const body = buildBody(newData, [
+            `**負責人**：${(newData.owners || []).join("、") || "-"}`,
+            `**所屬系統**：${systemNameOf(newSystem)}`,
+          ]);
+          await ghFetch(`/issues/${m.number}`, { method: "PATCH", body: JSON.stringify({ body }) });
+          m.data = newData;
+          renderModuleList();
+        } catch (e) {
+          alert("更新失敗：" + e.message);
+        }
+      });
+    });
 
     el.querySelectorAll("[data-remove-module]").forEach((btn) => {
       btn.addEventListener("click", async () => {
@@ -1137,9 +1395,13 @@
     const ownersRaw = document.getElementById("newModuleOwners").value.trim();
     if (!name) return;
     const owners = ownersRaw ? ownersRaw.split(/[,、]/).map((s) => s.trim()).filter(Boolean) : [];
+    const system = Number(document.getElementById("newModuleSystem").value) || (state.systems[0]?.number ?? null);
 
-    const dataObj = { name, owners };
-    const body = buildBody(dataObj, [`**負責人**：${owners.join("、") || "-"}`]);
+    const dataObj = { name, owners, system };
+    const body = buildBody(dataObj, [
+      `**負責人**：${owners.join("、") || "-"}`,
+      `**所屬系統**：${systemNameOf(system)}`,
+    ]);
     const btn = e.target.querySelector("button[type=submit]");
     const originalBtnText = btn.textContent;
     btn.disabled = true;
@@ -1163,21 +1425,61 @@
     btn.textContent = originalBtnText;
   }
 
+  // 舊格式每日追蹤/交付測試資料只有名稱，沒有 moduleId：用名稱比對目前模組清單回填。
+  function resolveLegacyModuleId(name) {
+    const m = state.modules.find((mm) => mm.data.name === name);
+    return m ? m.number : null;
+  }
+
+  function buildDailyEntryBody(dataObj) {
+    return buildBody(dataObj, [
+      `**模組**：${dataObj.module}`,
+      `**日期**：${dataObj.date}`,
+      ...state.dailyFields.map((f) => `**${f.label}**：${(dataObj.values && dataObj.values[f.key]) || 0}`),
+      `**回報人**：${dataObj.reporter || "-"}`,
+    ]);
+  }
+
+  // 背景把補上 moduleId 的每日資料 PATCH 回 GitHub，失敗不影響畫面（下次載入再試一次）。
+  async function backfillDailyEntryModuleIds(items) {
+    for (const it of items) {
+      try {
+        await ghFetch(`/issues/${it.number}`, { method: "PATCH", body: JSON.stringify({ body: buildDailyEntryBody(it.data) }) });
+      } catch (e) {
+        /* 下次載入再試 */
+      }
+    }
+  }
+
   async function loadDailyEntries(date) {
     setDailyStatus("載入當日資料中…");
     try {
       const dateLabel = `date:${date}`;
       const issues = await ghFetch(`/issues?labels=${enc(LABEL.daily)},${enc(dateLabel)}&state=all&per_page=100`);
       const map = {};
+      const orphaned = [];
+      const backfills = [];
       issues.forEach((issue) => {
         const d = extractData(issue.body);
-        if (d && d.module) map[d.module] = { number: issue.number, data: d };
+        if (!d || !d.module) return;
+        let moduleId = d.moduleId;
+        if (!moduleId) {
+          moduleId = resolveLegacyModuleId(d.module);
+          if (moduleId) backfills.push({ number: issue.number, data: { ...d, moduleId } });
+        }
+        if (moduleId) {
+          map[moduleId] = { number: issue.number, data: { ...d, moduleId } };
+        } else {
+          orphaned.push({ number: issue.number, data: d });
+        }
       });
       state.dailyEntries = map;
+      state.dailyEntriesOrphaned = orphaned;
       state.dailyLoaded = true;
       renderDailyTable();
       renderSummary();
-      setDailyStatus("");
+      setDailyStatus(orphaned.length ? `有 ${orphaned.length} 筆舊資料因模組已刪除/改名無法自動對應，暫不顯示` : "", orphaned.length > 0);
+      if (backfills.length) backfillDailyEntryModuleIds(backfills);
     } catch (e) {
       setDailyStatus("讀取失敗：" + e.message, true);
       document.getElementById("dailyTableBody").innerHTML =
@@ -1210,7 +1512,8 @@
   function aggregateHistory(granularity) {
     const windowSize = granularity === "month" ? 6 : 8;
     const buckets = {};
-    state.dailyHistory.forEach((entry) => {
+    const systemModuleIds = dailySystemModuleIds();
+    state.dailyHistory.filter((entry) => systemModuleIds.has(entry.moduleId)).forEach((entry) => {
       const key = bucketKeyOf(entry.date, granularity);
       if (!buckets[key]) buckets[key] = {};
       state.dailyFields.forEach((f) => {
@@ -1234,12 +1537,28 @@
     setDashboardStatus("載入趨勢資料中…");
     try {
       const issues = await ghFetchAllPages(`/issues?labels=${enc(LABEL.daily)}&state=all&per_page=100`);
-      state.dailyHistory = issues
-        .map((issue) => extractData(issue.body))
-        .filter((d) => d && d.module && d.date)
-        .map((d) => ({ module: d.module, date: d.date, values: getEntryValues(d) }));
+      const history = [];
+      const orphaned = [];
+      const backfills = [];
+      issues.forEach((issue) => {
+        const d = extractData(issue.body);
+        if (!d || !d.module || !d.date) return;
+        let moduleId = d.moduleId;
+        if (!moduleId) {
+          moduleId = resolveLegacyModuleId(d.module);
+          if (moduleId) backfills.push({ number: issue.number, data: { ...d, moduleId } });
+        }
+        if (moduleId) {
+          history.push({ moduleId, module: d.module, date: d.date, values: getEntryValues(d) });
+        } else {
+          orphaned.push({ number: issue.number, data: d });
+        }
+      });
+      state.dailyHistory = history;
+      state.dailyHistoryOrphaned = orphaned;
       state.dailyHistoryLoaded = true;
       renderDailyDashboard();
+      if (backfills.length) backfillDailyEntryModuleIds(backfills);
     } catch (e) {
       state.dailyHistoryLoaded = false;
       setDashboardStatus("無法載入趨勢資料：" + e.message, true);
@@ -1327,13 +1646,13 @@
 
   function dailyRowHTML(mod) {
     const name = mod.data.name;
-    const entry = state.dailyEntries[name];
+    const entry = state.dailyEntries[mod.number];
     const values = entry ? getEntryValues(entry.data) : {};
     const cells = state.dailyFields
       .map((f) => `<td><input type="number" min="0" class="num-input" data-field-key="${escapeHTML(f.key)}" value="${values[f.key] || 0}"></td>`)
       .join("");
     return `
-      <tr data-module="${escapeHTML(name)}">
+      <tr data-module-id="${mod.number}">
         <td>${escapeHTML(name)}</td>
         <td class="muted">${escapeHTML((mod.data.owners || []).join("、"))}</td>
         ${cells}
@@ -1343,40 +1662,39 @@
 
   function renderDailyTable() {
     const tbody = document.getElementById("dailyTableBody");
-    tbody.innerHTML = state.modules.length
-      ? state.modules.map(dailyRowHTML).join("")
-      : `<tr><td colspan="${state.dailyFields.length + 3}" class="empty-hint">尚未新增模組，請先在上方「模組管理」新增</td></tr>`;
+    const mods = state.modules.filter((m) => m.data.system === state.selectedDailySystem);
+    tbody.innerHTML = mods.length
+      ? mods.map(dailyRowHTML).join("")
+      : `<tr><td colspan="${state.dailyFields.length + 3}" class="empty-hint">此系統尚未新增模組，請先在上方「模組管理」新增</td></tr>`;
   }
 
-  async function saveDailyEntry(moduleName, btn) {
+  async function saveDailyEntry(moduleId, btn) {
     const tr = btn.closest("tr");
+    const mod = state.modules.find((m) => m.number === moduleId);
+    const moduleName = mod ? mod.data.name : "";
     const values = {};
     state.dailyFields.forEach((f) => {
       const input = tr.querySelector(`[data-field-key="${CSS.escape(f.key)}"]`);
       values[f.key] = Number(input.value) || 0;
     });
     const dataObj = {
+      moduleId,
       module: moduleName,
       date: state.dailyDate,
       values,
       reporter: state.displayName || "-",
     };
-    const body = buildBody(dataObj, [
-      `**模組**：${moduleName}`,
-      `**日期**：${state.dailyDate}`,
-      ...state.dailyFields.map((f) => `**${f.label}**：${values[f.key]}`),
-      `**回報人**：${dataObj.reporter}`,
-    ]);
+    const body = buildDailyEntryBody(dataObj);
 
     btn.disabled = true;
     try {
-      const existing = state.dailyEntries[moduleName];
+      const existing = state.dailyEntries[moduleId];
       if (existing) {
         await ghFetch(`/issues/${existing.number}`, { method: "PATCH", body: JSON.stringify({ body }) });
         existing.data = dataObj;
       } else {
         const dateLabel = `date:${state.dailyDate}`;
-        const modLabel = `module:${moduleName}`;
+        const modLabel = `module:${moduleId}`;
         await ensureLabel(dateLabel, "c5def5");
         await ensureLabel(modLabel, "bfd4f2");
         const issue = await ghFetch("/issues", {
@@ -1387,15 +1705,15 @@
             labels: [LABEL.daily, modLabel, dateLabel],
           }),
         });
-        state.dailyEntries[moduleName] = { number: issue.number, data: dataObj };
+        state.dailyEntries[moduleId] = { number: issue.number, data: dataObj };
       }
       renderSummary();
       if (state.dailyHistoryLoaded) {
-        const existingHistoryEntry = state.dailyHistory.find((h) => h.module === moduleName && h.date === state.dailyDate);
+        const existingHistoryEntry = state.dailyHistory.find((h) => h.moduleId === moduleId && h.date === state.dailyDate);
         if (existingHistoryEntry) {
           existingHistoryEntry.values = values;
         } else {
-          state.dailyHistory.push({ module: moduleName, date: state.dailyDate, values });
+          state.dailyHistory.push({ moduleId, module: moduleName, date: state.dailyDate, values });
         }
         renderDailyDashboard();
       }
@@ -1414,8 +1732,12 @@
   function renderSummary() {
     const totals = {};
     state.dailyFields.forEach((f) => { totals[f.key] = 0; });
-    const hasAnyEntries = Object.keys(state.dailyEntries).length > 0;
-    Object.values(state.dailyEntries).forEach((e) => {
+    const systemModuleIds = dailySystemModuleIds();
+    const entriesInSystem = Object.entries(state.dailyEntries)
+      .filter(([moduleId]) => systemModuleIds.has(Number(moduleId)))
+      .map(([, e]) => e);
+    const hasAnyEntries = entriesInSystem.length > 0;
+    entriesInSystem.forEach((e) => {
       const values = getEntryValues(e.data);
       state.dailyFields.forEach((f) => { totals[f.key] += values[f.key] || 0; });
     });
@@ -1450,8 +1772,33 @@
 
   async function loadTestingAll() {
     if (state.modules.length === 0) await loadModules();
+    populateTestingSystemSelect();
     await loadTestItems();
     await loadPhaseSettings();
+  }
+
+  function populateTestingSystemSelect() {
+    const sel = document.getElementById("testingSystemSelect");
+    if (!sel) return;
+    const resolved = resolveSelectedSystem(state.selectedTestingSystem);
+    if (resolved !== state.selectedTestingSystem) {
+      state.selectedTestingSystem = resolved;
+      localStorage.setItem(LS_SELECTED_TESTING_SYSTEM, String(resolved || ""));
+    }
+    sel.innerHTML = state.systems.map((s) =>
+      `<option value="${s.number}" ${s.number === resolved ? "selected" : ""}>${escapeHTML(s.name)}</option>`
+    ).join("");
+  }
+
+  function setSelectedTestingSystem(id) {
+    state.selectedTestingSystem = id;
+    localStorage.setItem(LS_SELECTED_TESTING_SYSTEM, String(id || ""));
+    renderTestingOverview();
+  }
+
+  // 目前選中系統底下的模組 number 集合，交付測試卡片/月份分群過濾用。
+  function testingSystemModuleIds() {
+    return new Set(state.modules.filter((m) => m.data.system === state.selectedTestingSystem).map((m) => m.number));
   }
 
   function mapTestBatchIssue(issue) {
@@ -1460,8 +1807,23 @@
       number: issue.number,
       fsd: d.fsd || "",
       fsdName: d.fsdName || "",
+      moduleId: d.moduleId || null,
       items: Array.isArray(d.items) ? d.items : [],
     };
+  }
+
+  // 背景把用名稱回填出來的 moduleId PATCH 回舊的 batch issue，失敗不影響畫面（下次載入再試一次）。
+  async function backfillBatchModuleId(batch) {
+    try {
+      const body = buildBody({ fsd: batch.fsd, fsdName: batch.fsdName, moduleId: batch.moduleId, items: batch.items }, [
+        `**FSD**：${batch.fsd}`,
+        `**FSD名稱**：${batch.fsdName}`,
+        `**功能項目數**：${batch.items.length}`,
+      ]);
+      await ghFetch(`/issues/${batch.number}`, { method: "PATCH", body: JSON.stringify({ body }) });
+    } catch (e) {
+      /* 下次載入再試 */
+    }
   }
 
   async function loadTestItems() {
@@ -1469,15 +1831,28 @@
     try {
       const issues = await ghFetch(`/issues?labels=${enc(LABEL.testItemBatch)}&state=open&per_page=100`);
       state.testBatches = issues.map(mapTestBatchIssue);
+      // 舊 batch 沒有 moduleId：用名稱回填，才能讓依系統過濾正常運作（不然這些 batch 會因為
+      // moduleId 對不到任何系統而永遠不會被渲染，也就永遠沒機會在 renderOverviewCard 裡被回填）。
+      const backfills = [];
+      state.testBatches.forEach((batch) => {
+        if (!batch.moduleId) {
+          const mod = state.modules.find((m) => m.data.name === batch.fsd);
+          if (mod) {
+            batch.moduleId = mod.number;
+            backfills.push(batch);
+          }
+        }
+      });
       state.testItems = [];
       state.testBatches.forEach((batch) => {
         batch.items.forEach((item) => {
-          state.testItems.push({ ...item, _batchNumber: batch.number, _fsd: batch.fsd, _fsdName: batch.fsdName });
+          state.testItems.push({ ...item, _batchNumber: batch.number, _fsd: batch.fsd, _fsdName: batch.fsdName, _moduleId: batch.moduleId });
         });
       });
       state.testingLoaded = true;
       renderTestingOverview();
       setTestingStatus("");
+      backfills.forEach((b) => backfillBatchModuleId(b));
     } catch (e) {
       setTestingStatus("讀取失敗：" + e.message, true);
       document.getElementById("testingOverview").innerHTML =
@@ -1640,7 +2015,8 @@
   function groupByCustomerTestMonth() {
     const buckets = {};
     const today = todayStr();
-    state.testItems.forEach((it) => {
+    const systemModuleIds = testingSystemModuleIds();
+    state.testItems.filter((it) => systemModuleIds.has(it._moduleId)).forEach((it) => {
       if (!it.customerTestDate) return;
       const month = it.customerTestDate.slice(0, 7);
       if (!buckets[month]) buckets[month] = { delivered: 0, overdue: 0, pending: 0 };
@@ -1683,11 +2059,13 @@
     const container = document.getElementById("testingOverview");
     renderCustomerTestMonthSummary();
     if (!state.testingLoaded) return;
-    if (state.testBatches.length === 0) {
-      container.innerHTML = '<div class="empty-hint">尚無交付/測試資料，請先用「上傳 Excel 更新」匯入</div>';
+    const systemModuleIds = testingSystemModuleIds();
+    const batchesInSystem = state.testBatches.filter((b) => systemModuleIds.has(b.moduleId));
+    if (batchesInSystem.length === 0) {
+      container.innerHTML = '<div class="empty-hint">此系統尚無交付/測試資料，請先用「上傳 Excel 更新」匯入</div>';
       return;
     }
-    container.innerHTML = state.testBatches
+    container.innerHTML = batchesInSystem
       .slice()
       .sort((a, b) => a.fsd.localeCompare(b.fsd))
       .map(renderOverviewCard)
@@ -1712,7 +2090,14 @@
 
   function renderOverviewCard(batch) {
     const items = batch.items;
-    const mod = state.modules.find((m) => m.data.name === batch.fsd);
+    let mod = batch.moduleId ? state.modules.find((m) => m.number === batch.moduleId) : null;
+    if (!mod) {
+      mod = state.modules.find((m) => m.data.name === batch.fsd);
+      if (mod) {
+        batch.moduleId = mod.number;
+        backfillBatchModuleId(batch);
+      }
+    }
     const owners = mod ? (mod.data.owners || []).join("、") : "";
 
     const dates = items.map((it) => it.plannedDeliveryDate).filter(Boolean).sort();
@@ -1882,7 +2267,7 @@
     btn.disabled = true;
     try {
       const body = buildBody(
-        { fsd: batch.fsd, fsdName: batch.fsdName, items: batch.items },
+        { fsd: batch.fsd, fsdName: batch.fsdName, moduleId: batch.moduleId, items: batch.items },
         [`**FSD**：${batch.fsd}`, `**FSD名稱**：${batch.fsdName}`, `**功能項目數**：${batch.items.length}`]
       );
       await ghFetch(`/issues/${batch.number}`, { method: "PATCH", body: JSON.stringify({ body }) });
@@ -1998,10 +2383,16 @@
 
   async function mergeAndUploadRecords(records) {
     const fsdCodes = [...new Set(records.map((r) => r.fsd))];
+    // Excel 上傳遇到目前系統清單裡完全沒有的 FSD 時，新模組歸屬到目前「交付測試追蹤」頁籤所選的系統
+    // （沒選過就用系統清單第一個）。
+    const newModuleSystem = state.selectedTestingSystem || state.systems[0]?.number || null;
     for (const fsd of fsdCodes) {
       const exists = state.modules.some((m) => m.data.name === fsd);
       if (!exists) {
-        const body = buildBody({ name: fsd, owners: [] }, ["**負責人**：-"]);
+        const body = buildBody({ name: fsd, owners: [], system: newModuleSystem }, [
+          "**負責人**：-",
+          `**所屬系統**：${systemNameOf(newModuleSystem)}`,
+        ]);
         await ghFetch("/issues", {
           method: "POST",
           body: JSON.stringify({ title: `[module] ${fsd}`, body, labels: [LABEL.module] }),
@@ -2062,7 +2453,8 @@
 
       const mergedItems = Object.values(existingItemsById);
       const fsdName = incoming[incoming.length - 1].fsdName || (existingBatch ? existingBatch.fsdName : "");
-      const body = buildBody({ fsd, fsdName, items: mergedItems }, [
+      const moduleId = state.modules.find((m) => m.data.name === fsd)?.number || existingBatch?.moduleId || null;
+      const body = buildBody({ fsd, fsdName, moduleId, items: mergedItems }, [
         `**FSD**：${fsd}`,
         `**FSD名稱**：${fsdName}`,
         `**功能項目數**：${mergedItems.length}`,

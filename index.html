@@ -89,6 +89,10 @@
     <section id="dailyView" class="tab-view">
       <div class="toolbar">
         <label class="date-field">
+          系統
+          <select id="dailySystemSelect"></select>
+        </label>
+        <label class="date-field">
           日期
           <input type="date" id="dailyDatePicker">
         </label>
@@ -132,6 +136,10 @@
 
     <section id="testingView" class="tab-view">
       <div class="toolbar">
+        <label class="date-field">
+          系統
+          <select id="testingSystemSelect"></select>
+        </label>
         <button class="btn-ghost" id="downloadTemplateBtn">下載 Excel 範本</button>
         <input type="file" id="uploadExcelInput" accept=".xlsx" class="hidden">
         <button class="btn-primary" id="uploadExcelBtn">上傳 Excel 更新</button>
@@ -173,9 +181,21 @@
         <div class="module-panel-title">看板設定項目說明</div>
         <p class="help-text">這裡的設定會影響其他頁籤的顯示，修改後請留意：</p>
         <ul class="settings-explain-list">
+          <li><strong>系統管理</strong>：會影響模組的分類方式，以及「每日測試追蹤」「交付測試追蹤」的系統切換選單。</li>
           <li><strong>FSD 模組管理</strong>：會影響「每日測試追蹤」的模組清單與加總、「交付測試追蹤」的模組總覽卡片分組，以及上傳 Excel 時比對/自動建立模組的依據。</li>
           <li><strong>追蹤項目設定</strong>：會影響「每日測試追蹤」表格的欄位、下方 Summary 加總，以及趨勢圖表顯示的項目。</li>
         </ul>
+      </div>
+
+      <div class="module-panel">
+        <div class="module-panel-title">系統管理</div>
+        <p class="help-text">系統改名只影響顯示，不影響任何歷史資料的對應關係。系統底下還有模組時無法刪除。</p>
+        <div class="module-list" id="systemList"></div>
+        <form id="addSystemForm" class="inline-form">
+          <input type="text" id="newSystemName" placeholder="系統名稱（例如：旅平險系統）" required>
+          <button type="submit" class="btn-primary">新增系統</button>
+        </form>
+        <span class="status-msg" id="systemStatusMsg"></span>
       </div>
 
       <div class="module-panel">
@@ -184,6 +204,7 @@
         <form id="addModuleForm" class="inline-form">
           <input type="text" id="newModuleName" placeholder="模組名稱（例如：前台顯示）" required>
           <input type="text" id="newModuleOwners" placeholder="負責人（多人可用、分隔）">
+          <select id="newModuleSystem"></select>
           <button type="submit" class="btn-primary">新增模組</button>
         </form>
         <span class="status-msg" id="moduleStatusMsg"></span>
